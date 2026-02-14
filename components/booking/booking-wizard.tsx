@@ -1,129 +1,172 @@
-"use client"
+'use client';
 
-import { useState, useEffect, useCallback } from "react"
-import { format, isBefore, isToday, startOfDay, isSameMonth, addMonths, subMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay } from "date-fns"
-import { es } from "date-fns/locale"
-import { ChevronLeft, ChevronRight, Check, ArrowLeft, Loader2 } from "lucide-react"
-import { cn } from "@/lib/utils"
-import { useTreatments, useAvailableSlots, checkDateAvailability, useProfile } from "@/hooks/use-api"
-import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
+import { useState, useEffect, useCallback } from 'react';
+import {
+  format,
+  isBefore,
+  isToday,
+  startOfDay,
+  isSameMonth,
+  addMonths,
+  subMonths,
+  startOfMonth,
+  endOfMonth,
+  startOfWeek,
+  endOfWeek,
+  eachDayOfInterval,
+  isSameDay,
+} from 'date-fns';
+import { es } from 'date-fns/locale';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Check,
+  ArrowLeft,
+  Loader2,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import {
+  useTreatments,
+  useAvailableSlots,
+  checkDateAvailability,
+  useProfile,
+} from '@/hooks/use-api';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 
-type Step = 1 | 2 | 3 | 4
+type Step = 1 | 2 | 3 | 4;
 
 interface BookingWizardProps {
-  onComplete: () => void
+  onComplete: () => void;
 }
 
 export function BookingWizard({ onComplete }: BookingWizardProps) {
-  const [step, setStep] = useState<Step>(1)
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null)
-  const [selectedTime, setSelectedTime] = useState<string | null>(null)
-  const [selectedTreatments, setSelectedTreatments] = useState<string[]>([])
-  const [currentMonth, setCurrentMonth] = useState(new Date())
-  const [submitting, setSubmitting] = useState(false)
-  const [phone, setPhone] = useState("")
+  const [step, setStep] = useState<Step>(1);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [selectedTreatments, setSelectedTreatments] = useState<string[]>([]);
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [submitting, setSubmitting] = useState(false);
+  const [phone, setPhone] = useState('');
 
-  const { activeTreatments, loading: treatmentsLoading } = useTreatments()
-  const { profile } = useProfile()
+  const { activeTreatments, loading: treatmentsLoading } = useTreatments();
+  const { profile } = useProfile();
 
-  const dateStr = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null
-  const { slots: availableSlots, loading: slotsLoading } = useAvailableSlots(dateStr)
+  const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null;
+  const { slots: availableSlots, loading: slotsLoading } =
+    useAvailableSlots(dateStr);
 
   // Track date availability for calendar rendering
-  const [dateAvailability, setDateAvailability] = useState<Record<string, boolean>>({})
+  const [dateAvailability, setDateAvailability] = useState<
+    Record<string, boolean>
+  >({});
 
   // Calendar logic
-  const monthStart = startOfMonth(currentMonth)
-  const monthEnd = endOfMonth(currentMonth)
-  const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 })
-  const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 })
-  const calendarDays = eachDayOfInterval({ start: calendarStart, end: calendarEnd })
+  const monthStart = startOfMonth(currentMonth);
+  const monthEnd = endOfMonth(currentMonth);
+  const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+  const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
+  const calendarDays = eachDayOfInterval({
+    start: calendarStart,
+    end: calendarEnd,
+  });
 
-  const today = startOfDay(new Date())
+  const today = startOfDay(new Date());
 
   // Check availability for all visible days in current month
   useEffect(() => {
     const futureDays = calendarDays.filter(
-      (day) => !isBefore(day, today) && !isToday(day) && isSameMonth(day, currentMonth)
-    )
-    let cancelled = false
+      (day) =>
+        !isBefore(day, today) &&
+        !isToday(day) &&
+        isSameMonth(day, currentMonth),
+    );
+    let cancelled = false;
 
     async function checkAll() {
-      const results: Record<string, boolean> = {}
+      const results: Record<string, boolean> = {};
       await Promise.all(
         futureDays.map(async (day) => {
-          const ds = format(day, "yyyy-MM-dd")
-          const available = await checkDateAvailability(ds)
-          if (!cancelled) results[ds] = available
-        })
-      )
-      if (!cancelled) setDateAvailability((prev) => ({ ...prev, ...results }))
+          const ds = format(day, 'yyyy-MM-dd');
+          const available = await checkDateAvailability(ds);
+          if (!cancelled) results[ds] = available;
+        }),
+      );
+      if (!cancelled) setDateAvailability((prev) => ({ ...prev, ...results }));
     }
 
-    checkAll()
-    return () => { cancelled = true }
-  }, [currentMonth]) // eslint-disable-line react-hooks/exhaustive-deps
+    checkAll();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentMonth]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-fill phone from profile
   useEffect(() => {
-    if (profile?.phone) setPhone(profile.phone)
-  }, [profile])
+    if (profile?.phone) setPhone(profile.phone);
+  }, [profile]);
 
   const toggleTreatment = useCallback((id: string) => {
     setSelectedTreatments((prev) =>
-      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
-    )
-  }, [])
+      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id],
+    );
+  }, []);
 
   const handleConfirm = useCallback(async () => {
-    if (!selectedDate || !selectedTime || selectedTreatments.length === 0 || !profile || !phone.trim()) return
+    if (
+      !selectedDate ||
+      !selectedTime ||
+      selectedTreatments.length === 0 ||
+      !profile ||
+      !phone.trim()
+    )
+      return;
 
     // Save phone to profile if missing or changed
     if (!profile.phone || profile.phone !== phone.trim()) {
-      await fetch("/api/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+      await fetch('/api/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: phone.trim() }),
-      })
+      });
     }
 
-    const [h, m] = selectedTime.split(":").map(Number)
-    const endH = h + 1
-    const endTime = `${endH.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
+    const [h, m] = selectedTime.split(':').map(Number);
+    const endH = h + 1;
+    const endTime = `${endH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 
-    setSubmitting(true)
+    setSubmitting(true);
     try {
-      await fetch("/api/appointments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      await fetch('/api/appointments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           client_id: profile.id,
-          date: format(selectedDate, "yyyy-MM-dd"),
+          date: format(selectedDate, 'yyyy-MM-dd'),
           start_time: selectedTime,
           end_time: endTime,
           treatment_ids: selectedTreatments,
           created_by: profile.id,
         }),
-      })
-      setStep(4)
+      });
+      setStep(4);
     } catch {
       // Could show error toast here
     } finally {
-      setSubmitting(false)
+      setSubmitting(false);
     }
-  }, [selectedDate, selectedTime, selectedTreatments, profile, phone])
+  }, [selectedDate, selectedTime, selectedTreatments, profile, phone]);
 
   const isDateSelectable = useCallback(
     (day: Date) => {
-      if (isBefore(day, today) || isToday(day)) return false
-      if (!isSameMonth(day, currentMonth)) return false
-      const ds = format(day, "yyyy-MM-dd")
-      return dateAvailability[ds] ?? false
+      if (isBefore(day, today) || isToday(day)) return false;
+      if (!isSameMonth(day, currentMonth)) return false;
+      const ds = format(day, 'yyyy-MM-dd');
+      return dateAvailability[ds] ?? false;
     },
-    [currentMonth, today, dateAvailability]
-  )
+    [currentMonth, today, dateAvailability],
+  );
 
   return (
     <div className="mx-auto w-full max-w-lg">
@@ -134,13 +177,13 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
             <div
               key={s}
               className={cn(
-                "h-2 w-8 rounded-full transition-colors duration-200",
-                s <= step ? "bg-primary" : "bg-border"
+                'h-2 w-8 rounded-full transition-colors duration-200',
+                s <= step ? 'bg-primary' : 'bg-border',
               )}
             />
           ))}
           <span className="ml-3 text-sm text-muted-foreground">
-            {"Paso"} {step}/3
+            {'Paso'} {step}/3
           </span>
         </div>
       )}
@@ -163,7 +206,7 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
               <span className="sr-only">Mes anterior</span>
             </button>
             <span className="text-sm font-medium capitalize text-foreground">
-              {format(currentMonth, "MMMM yyyy", { locale: es })}
+              {format(currentMonth, 'MMMM yyyy', { locale: es })}
             </span>
             <button
               onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
@@ -176,8 +219,11 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
 
           {/* Day headers */}
           <div className="mb-1 grid grid-cols-7 text-center">
-            {["Lu", "Ma", "Mi", "Ju", "Vi", "Sa", "Do"].map((d) => (
-              <div key={d} className="py-2 text-xs font-medium text-muted-foreground">
+            {['Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sa', 'Do'].map((d) => (
+              <div
+                key={d}
+                className="py-2 text-xs font-medium text-muted-foreground"
+              >
                 {d}
               </div>
             ))}
@@ -186,30 +232,35 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
           {/* Calendar grid */}
           <div className="grid grid-cols-7 gap-1">
             {calendarDays.map((day) => {
-              const selectable = isDateSelectable(day)
-              const isSelected = selectedDate && isSameDay(day, selectedDate)
-              const inMonth = isSameMonth(day, currentMonth)
+              const selectable = isDateSelectable(day);
+              const isSelected = selectedDate && isSameDay(day, selectedDate);
+              const inMonth = isSameMonth(day, currentMonth);
 
               return (
                 <button
                   key={day.toISOString()}
                   disabled={!selectable}
                   onClick={() => {
-                    setSelectedDate(day)
-                    setSelectedTime(null)
-                    setStep(2)
+                    setSelectedDate(day);
+                    setSelectedTime(null);
+                    setStep(2);
                   }}
                   className={cn(
-                    "flex h-10 w-full items-center justify-center rounded-md text-sm transition-colors duration-200",
-                    !inMonth && "text-transparent",
-                    inMonth && !selectable && "text-muted-foreground/40 cursor-not-allowed",
-                    inMonth && selectable && "text-foreground hover:bg-primary/10 cursor-pointer",
-                    isSelected && "bg-primary text-primary-foreground hover:bg-primary/90"
+                    'flex h-10 w-full items-center justify-center rounded-md text-sm transition-colors duration-200',
+                    !inMonth && 'text-transparent',
+                    inMonth &&
+                      !selectable &&
+                      'text-muted-foreground/40 cursor-not-allowed',
+                    inMonth &&
+                      selectable &&
+                      'text-foreground hover:bg-primary/10 cursor-pointer',
+                    isSelected &&
+                      'bg-primary text-primary-foreground hover:bg-primary/90',
                   )}
                 >
-                  {format(day, "d")}
+                  {format(day, 'd')}
                 </button>
-              )
+              );
             })}
           </div>
 
@@ -260,14 +311,14 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
                 <button
                   key={slot}
                   onClick={() => {
-                    setSelectedTime(slot)
-                    setStep(3)
+                    setSelectedTime(slot);
+                    setStep(3);
                   }}
                   className={cn(
-                    "rounded-lg border px-3 py-3 font-mono text-sm font-medium transition-all duration-200",
+                    'rounded-lg border px-3 py-3 font-mono text-sm font-medium transition-all duration-200',
                     selectedTime === slot
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border bg-card text-foreground hover:border-primary/50 hover:bg-primary/5"
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border bg-card text-foreground hover:border-primary/50 hover:bg-primary/5',
                   )}
                 >
                   {slot}
@@ -296,7 +347,7 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
             <span className="capitalize">
               {format(selectedDate, "EEEE d 'de' MMMM", { locale: es })}
             </span>
-            {" a las "}
+            {' a las '}
             <span className="font-mono">{selectedTime}</span>
           </p>
 
@@ -310,17 +361,19 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
                 <label
                   key={t.id}
                   className={cn(
-                    "flex cursor-pointer items-center gap-3 rounded-lg border px-4 py-3 transition-colors duration-200",
+                    'flex cursor-pointer items-center gap-3 rounded-lg border px-4 py-3 transition-colors duration-200',
                     selectedTreatments.includes(t.id)
-                      ? "border-primary/50 bg-primary/5"
-                      : "border-border hover:bg-muted/50"
+                      ? 'border-primary/50 bg-primary/5'
+                      : 'border-border hover:bg-muted/50',
                   )}
                 >
                   <Checkbox
                     checked={selectedTreatments.includes(t.id)}
                     onCheckedChange={() => toggleTreatment(t.id)}
                   />
-                  <span className="text-sm font-medium text-foreground">{t.name}</span>
+                  <span className="text-sm font-medium text-foreground">
+                    {t.name}
+                  </span>
                 </label>
               ))}
             </div>
@@ -346,7 +399,9 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
           <Button
             className="mt-6 w-full bg-primary text-primary-foreground hover:bg-primary/90"
             size="lg"
-            disabled={selectedTreatments.length === 0 || !phone.trim() || submitting}
+            disabled={
+              selectedTreatments.length === 0 || !phone.trim() || submitting
+            }
             onClick={handleConfirm}
           >
             {submitting ? (
@@ -374,7 +429,7 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
           </p>
           <div className="mb-6 flex flex-wrap items-center justify-center gap-2">
             {selectedTreatments.map((id) => {
-              const t = activeTreatments.find((tr) => tr.id === id)
+              const t = activeTreatments.find((tr) => tr.id === id);
               return t ? (
                 <span
                   key={id}
@@ -382,7 +437,7 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
                 >
                   {t.name}
                 </span>
-              ) : null
+              ) : null;
             })}
           </div>
           <Button
@@ -394,5 +449,5 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
         </div>
       )}
     </div>
-  )
+  );
 }
