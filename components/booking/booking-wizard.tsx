@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import { useTreatments, useAvailableSlots, checkDateAvailability, useProfile } from "@/hooks/use-api"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
 
 type Step = 1 | 2 | 3 | 4
 
@@ -22,6 +23,7 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
   const [selectedTreatments, setSelectedTreatments] = useState<string[]>([])
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [submitting, setSubmitting] = useState(false)
+  const [phone, setPhone] = useState("")
 
   const { activeTreatments, loading: treatmentsLoading } = useTreatments()
   const { profile } = useProfile()
@@ -64,6 +66,11 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
     return () => { cancelled = true }
   }, [currentMonth]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Pre-fill phone from profile
+  useEffect(() => {
+    if (profile?.phone) setPhone(profile.phone)
+  }, [profile])
+
   const toggleTreatment = useCallback((id: string) => {
     setSelectedTreatments((prev) =>
       prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
@@ -71,7 +78,16 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
   }, [])
 
   const handleConfirm = useCallback(async () => {
-    if (!selectedDate || !selectedTime || selectedTreatments.length === 0 || !profile) return
+    if (!selectedDate || !selectedTime || selectedTreatments.length === 0 || !profile || !phone.trim()) return
+
+    // Save phone to profile if missing or changed
+    if (!profile.phone || profile.phone !== phone.trim()) {
+      await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: phone.trim() }),
+      })
+    }
 
     const [h, m] = selectedTime.split(":").map(Number)
     const endH = h + 1
@@ -97,7 +113,7 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
     } finally {
       setSubmitting(false)
     }
-  }, [selectedDate, selectedTime, selectedTreatments, profile])
+  }, [selectedDate, selectedTime, selectedTreatments, profile, phone])
 
   const isDateSelectable = useCallback(
     (day: Date) => {
@@ -310,10 +326,27 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
             </div>
           )}
 
+          {/* Phone number */}
+          <div className="mt-4">
+            <label className="mb-1.5 block text-sm font-medium text-foreground">
+              Numero de telefono
+            </label>
+            <Input
+              type="tel"
+              placeholder="Ej: 11 2345-6789"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="font-mono"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Para que podamos contactarte en caso de cambios
+            </p>
+          </div>
+
           <Button
             className="mt-6 w-full bg-primary text-primary-foreground hover:bg-primary/90"
             size="lg"
-            disabled={selectedTreatments.length === 0 || submitting}
+            disabled={selectedTreatments.length === 0 || !phone.trim() || submitting}
             onClick={handleConfirm}
           >
             {submitting ? (

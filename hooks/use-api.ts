@@ -19,6 +19,7 @@ function useApiFetch<T>(url: string | null) {
   const [error, setError] = useState<string | null>(null);
   const urlRef = useRef(url);
   urlRef.current = url;
+  const initialised = useRef(false);
 
   const refetch = useCallback(async () => {
     const currentUrl = urlRef.current;
@@ -27,7 +28,8 @@ function useApiFetch<T>(url: string | null) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    // Only show full loading spinner on first load
+    if (!initialised.current) setLoading(true);
     setError(null);
     try {
       const res = await fetch(currentUrl);
@@ -37,6 +39,7 @@ function useApiFetch<T>(url: string | null) {
       }
       const json = await res.json();
       setData(json);
+      initialised.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
