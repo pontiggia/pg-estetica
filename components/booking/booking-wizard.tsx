@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   format,
   isBefore,
@@ -28,7 +28,8 @@ import { cn } from '@/lib/utils';
 import {
   useTreatments,
   useAvailableSlots,
-  checkDatesAvailabilityBatch,
+  useAvailability,
+  useOverrides,
   useProfile,
 } from '@/hooks/use-api';
 import { Button } from '@/components/ui/button';
@@ -52,15 +53,33 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
 
   const { activeTreatments, loading: treatmentsLoading } = useTreatments();
   const { profile } = useProfile();
+  const { availability, loading: availLoading } = useAvailability();
+  const { overrides, loading: overridesLoading } = useOverrides();
 
   const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null;
   const { slots: availableSlots, loading: slotsLoading } =
     useAvailableSlots(dateStr);
 
-  // Track date availability for calendar rendering
-  const [dateAvailability, setDateAvailability] = useState<
-    Record<string, boolean>
-  >({});
+  // Build a set of active weekdays and full-day-blocked dates once (client-side)
+  const activeDays = useMemo(
+    () =>
+      new Set(
+        availability.filter((a) => a.is_active).map((a) => a.day_of_week),
+      ),
+    [availability],
+  );
+
+  const fullDayBlocked = useMemo(() => {
+    const blocked = new Set<string>();
+    for (const o of overrides) {
+      if (o.is_blocked && (!o.blocked_slots || o.blocked_slots.length === 0)) {
+        blocked.add(o.date);
+      }
+    }
+    return blocked;
+  }, [overrides]);
+
+  const scheduleReady = !availLoading && !overridesLoading;
 
   // Calendar logic
   const monthStart = startOfMonth(currentMonth);
@@ -73,28 +92,6 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
   });
 
   const today = startOfDay(new Date());
-
-  // Check availability for all visible days in current month (single batch call)
-  useEffect(() => {
-    const futureDays = calendarDays.filter(
-      (day) =>
-        !isBefore(day, today) &&
-        !isToday(day) &&
-        isSameMonth(day, currentMonth),
-    );
-    let cancelled = false;
-
-    async function checkAll() {
-      const dates = futureDays.map((day) => format(day, 'yyyy-MM-dd'));
-      const results = await checkDatesAvailabilityBatch(dates);
-      if (!cancelled) setDateAvailability((prev) => ({ ...prev, ...results }));
-    }
-
-    checkAll();
-    return () => {
-      cancelled = true;
-    };
-  }, [currentMonth]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-fill phone from profile
   useEffect(() => {
@@ -154,12 +151,16 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
 
   const isDateSelectable = useCallback(
     (day: Date) => {
+      if (!scheduleReady) return false;
       if (isBefore(day, today) || isToday(day)) return false;
       if (!isSameMonth(day, currentMonth)) return false;
+      const dayOfWeek = day.getDay();
+      if (!activeDays.has(dayOfWeek)) return false;
       const ds = format(day, 'yyyy-MM-dd');
-      return dateAvailability[ds] ?? false;
+      if (fullDayBlocked.has(ds)) return false;
+      return true;
     },
-    [currentMonth, today, dateAvailability],
+    [currentMonth, today, scheduleReady, activeDays, fullDayBlocked],
   );
 
   return (
