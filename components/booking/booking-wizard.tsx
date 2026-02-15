@@ -28,7 +28,7 @@ import { cn } from '@/lib/utils';
 import {
   useTreatments,
   useAvailableSlots,
-  checkDateAvailability,
+  checkDatesAvailabilityBatch,
   useProfile,
 } from '@/hooks/use-api';
 import { Button } from '@/components/ui/button';
@@ -74,7 +74,7 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
 
   const today = startOfDay(new Date());
 
-  // Check availability for all visible days in current month
+  // Check availability for all visible days in current month (single batch call)
   useEffect(() => {
     const futureDays = calendarDays.filter(
       (day) =>
@@ -85,14 +85,8 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
     let cancelled = false;
 
     async function checkAll() {
-      const results: Record<string, boolean> = {};
-      await Promise.all(
-        futureDays.map(async (day) => {
-          const ds = format(day, 'yyyy-MM-dd');
-          const available = await checkDateAvailability(ds);
-          if (!cancelled) results[ds] = available;
-        }),
-      );
+      const dates = futureDays.map((day) => format(day, 'yyyy-MM-dd'));
+      const results = await checkDatesAvailabilityBatch(dates);
       if (!cancelled) setDateAvailability((prev) => ({ ...prev, ...results }));
     }
 

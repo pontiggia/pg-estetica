@@ -290,7 +290,33 @@ export function useClients() {
     [refetch],
   );
 
-  return { clients: data ?? [], loading, error, refetch, addClient };
+  const updateClient = useCallback(
+    async (
+      id: string,
+      updates: { full_name?: string; phone?: string; email?: string },
+    ) => {
+      const res = await fetch(`/api/clients/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to update client');
+      }
+      await refetch();
+    },
+    [refetch],
+  );
+
+  return {
+    clients: data ?? [],
+    loading,
+    error,
+    refetch,
+    addClient,
+    updateClient,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -334,5 +360,23 @@ export async function checkDateAvailability(date: string): Promise<boolean> {
     return json.available;
   } catch {
     return false;
+  }
+}
+
+// Batch check: returns a map of date → available for many dates in one call
+export async function checkDatesAvailabilityBatch(
+  dates: string[],
+): Promise<Record<string, boolean>> {
+  if (dates.length === 0) return {};
+  try {
+    const res = await fetch('/api/slots/check-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dates }),
+    });
+    if (!res.ok) return {};
+    return await res.json();
+  } catch {
+    return {};
   }
 }
