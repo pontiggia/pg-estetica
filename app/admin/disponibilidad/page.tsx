@@ -63,9 +63,11 @@ function TimePicker({
   onChange: (v: string) => void;
   label?: string;
 }) {
+  // Supabase returns time as "HH:MM:SS" but our options are "HH:MM"
+  const normalised = value?.slice(0, 5) ?? '09:00';
   return (
     <select
-      value={value}
+      value={normalised}
       onChange={(e) => onChange(e.target.value)}
       aria-label={label}
       className="appearance-none rounded-lg border bg-card px-3 py-2 pr-8 font-mono text-sm font-medium text-foreground shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer hover:bg-muted/50"
