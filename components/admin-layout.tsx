@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
@@ -60,15 +59,13 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
         )}
       >
         <div className="flex h-16 items-center justify-between border-b px-4">
-          <Link href="/admin" className="flex items-center">
-            <Image
-              src="/images/pg_horizontal_logo.png"
-              alt="Paula Guerendiain - Estetica Integral"
-              width={180}
-              height={44}
-              className="h-9 w-auto"
-              priority
-            />
+          <Link href="/admin" className="flex items-baseline gap-1.5">
+            <span className="font-serif text-lg tracking-tight text-foreground">
+              Paula Guerendiain
+            </span>
+            <span className="font-serif text-xs text-muted-foreground">
+              estetica
+            </span>
           </Link>
           <button
             onClick={() => setMobileOpen(false)}

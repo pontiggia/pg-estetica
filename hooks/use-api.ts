@@ -101,8 +101,12 @@ export function useTreatments() {
   );
 
   return {
-    treatments: data ?? [],
-    activeTreatments: (data ?? []).filter((t) => t.is_active),
+    treatments: (data ?? [])
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    activeTreatments: (data ?? [])
+      .filter((t) => t.is_active)
+      .sort((a, b) => a.name.localeCompare(b.name)),
     loading,
     error,
     refetch,
@@ -268,7 +272,25 @@ export function useOverrides() {
 export function useClients() {
   const { data, loading, error, refetch } =
     useApiFetch<Profile[]>('/api/clients');
-  return { clients: data ?? [], loading, error, refetch };
+
+  const addClient = useCallback(
+    async (body: { full_name: string; phone?: string; email?: string }) => {
+      const res = await fetch('/api/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to create client');
+      }
+      await refetch();
+      return res.json();
+    },
+    [refetch],
+  );
+
+  return { clients: data ?? [], loading, error, refetch, addClient };
 }
 
 // ---------------------------------------------------------------------------

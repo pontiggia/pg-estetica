@@ -6,8 +6,6 @@ export async function updateSession(request: NextRequest) {
     request,
   });
 
-  // With Fluid compute, don't put this client in a global environment
-  // variable. Always create a new one on each request.
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -35,21 +33,30 @@ export async function updateSession(request: NextRequest) {
   // supabase.auth.getUser(). A simple mistake could make it very hard to debug
   // issues with users being randomly logged out.
 
-  // IMPORTANT: If you remove getUser() and you use server-side rendering
-  // with the Supabase client, your users may be randomly logged out.
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Helper: create a redirect that preserves the refreshed session cookies.
+  // Without this the browser and server go out of sync and the user gets
+  // logged out on the very next request.
+  function redirectTo(pathname: string) {
+    const url = request.nextUrl.clone();
+    url.pathname = pathname;
+    const redirectResponse = NextResponse.redirect(url);
+    // Copy refreshed auth cookies so the session stays alive
+    supabaseResponse.cookies.getAll().forEach((cookie) => {
+      redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
+    });
+    return redirectResponse;
+  }
+
   // Protect /admin routes - require auth + admin role
   if (request.nextUrl.pathname.startsWith('/admin')) {
     if (!user) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/auth/admin';
-      return NextResponse.redirect(url);
+      return redirectTo('/auth/admin');
     }
 
-    // Check admin role
     const { data: profile } = await supabase
       .from('profiles')
       .select('role')
@@ -57,24 +64,18 @@ export async function updateSession(request: NextRequest) {
       .single();
 
     if (profile?.role !== 'admin') {
-      const url = request.nextUrl.clone();
-      url.pathname = '/';
-      return NextResponse.redirect(url);
+      return redirectTo('/');
     }
   }
 
   // Protect /mis-turnos - require auth (any role)
   if (request.nextUrl.pathname.startsWith('/mis-turnos') && !user) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/auth/login';
-    return NextResponse.redirect(url);
+    return redirectTo('/auth/login');
   }
 
   // If logged in user visits /auth/login, redirect home
   if (request.nextUrl.pathname.startsWith('/auth/login') && user) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/';
-    return NextResponse.redirect(url);
+    return redirectTo('/');
   }
 
   // If logged in admin visits /auth/admin, redirect to admin
@@ -86,24 +87,9 @@ export async function updateSession(request: NextRequest) {
       .single();
 
     if (profile?.role === 'admin') {
-      const url = request.nextUrl.clone();
-      url.pathname = '/admin';
-      return NextResponse.redirect(url);
+      return redirectTo('/admin');
     }
   }
-
-  // IMPORTANT: You *must* return the supabaseResponse object as it is.
-  // If you're creating a new response object with NextResponse.next() make sure to:
-  // 1. Pass the request in it, like so:
-  //    const myNewResponse = NextResponse.next({ request })
-  // 2. Copy over the cookies, like so:
-  //    myNewResponse.cookies.setAll(supabaseResponse.cookies.getAll())
-  // 3. Change the myNewResponse object to fit your needs, but avoid changing
-  //    the cookies!
-  // 4. Finally:
-  //    return myNewResponse
-  // If this is not done, you may be causing the browser and server to go out
-  // of sync and terminate the user's session prematurely!
 
   return supabaseResponse;
 }
