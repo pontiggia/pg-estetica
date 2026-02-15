@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
     (appointments ?? []).map((a) => a.start_time.slice(0, 5)),
   );
 
-  // Generate 70-minute interval slots
+  // Generate 75-minute interval slots (60min appointment + 15min buffer)
   const [startH, startM] = availData.start_time.split(':').map(Number);
   const [endH, endM] = availData.end_time.split(':').map(Number);
   const startMinutes = startH * 60 + startM;
@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
       slots.push(timeStr);
     }
 
-    current += 70;
+    current += 75;
   }
 
   return NextResponse.json({ slots, available: true });

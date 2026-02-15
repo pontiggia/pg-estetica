@@ -101,7 +101,7 @@ function generateAllSlots(startTime: string, endTime: string): string[] {
     slots.push(
       `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`,
     );
-    current += 70;
+    current += 75;
   }
   return slots;
 }
