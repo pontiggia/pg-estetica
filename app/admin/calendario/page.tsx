@@ -470,11 +470,6 @@ export default function CalendarioPage() {
                                 {appt.client.full_name}
                               </p>
                             )}
-                            {appt.treatments && appt.treatments.length > 0 && (
-                              <p className="truncate text-[10px] opacity-80">
-                                {appt.treatments.map((t) => t.name).join(', ')}
-                              </p>
-                            )}
                           </button>
                         ) : slotBlocked && !dayBlocked ? (
                           <button
