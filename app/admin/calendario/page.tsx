@@ -436,7 +436,7 @@ export default function CalendarioPage() {
                     const slotBlocked = isSlotBlocked(dateStr, slot);
                     const isActive = isDayOfWeekActive(day.getDay());
                     const appt = (appointmentsByDate[dateStr] || []).find(
-                      (a) => a.start_time === slot,
+                      (a) => a.start_time.slice(0, 5) === slot,
                     );
                     const slotInRange = isActive;
 
