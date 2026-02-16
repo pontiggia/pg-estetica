@@ -455,23 +455,23 @@ export default function CalendarioPage() {
                           <button
                             onClick={() => setSelectedAppointment(appt)}
                             className={cn(
-                              'w-full cursor-pointer rounded-md border px-2 py-1.5 text-left transition-all hover:shadow-md',
+                              'w-full h-full cursor-pointer border text-left transition-all bg-primary/10 text-primary p-1 rounded-none',
                               statusColors[appt.status],
                             )}
                           >
                             <div className="flex items-center gap-1">
                               <Clock className="h-3 w-3 shrink-0" />
                               <span className="font-mono text-[11px] font-semibold">
-                                {appt.start_time}-{appt.end_time}
+                                {`${appt.start_time.slice(0, 5)}-${appt.end_time.slice(0, 5)}`}
                               </span>
                             </div>
                             {appt.client && (
-                              <p className="mt-0.5 truncate text-xs font-medium">
+                              <p className="truncate text-xs font-medium">
                                 {appt.client.full_name}
                               </p>
                             )}
                             {appt.treatments && appt.treatments.length > 0 && (
-                              <p className="mt-0.5 truncate text-[10px] opacity-80">
+                              <p className="truncate text-[10px] opacity-80">
                                 {appt.treatments.map((t) => t.name).join(', ')}
                               </p>
                             )}
