@@ -173,6 +173,15 @@ export function useAppointments(params?: {
     [refetch],
   );
 
+  const deleteAppointment = useCallback(
+    async (id: string) => {
+      const res = await fetch(`/api/appointments/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete appointment');
+      await refetch();
+    },
+    [refetch],
+  );
+
   return {
     appointments: data ?? [],
     loading,
@@ -180,6 +189,7 @@ export function useAppointments(params?: {
     refetch,
     createAppointment,
     updateAppointmentStatus,
+    deleteAppointment,
   };
 }
 

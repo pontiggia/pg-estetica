@@ -66,3 +66,45 @@ export async function PATCH(
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)
 }
+
+// DELETE /api/appointments/:id - Hard-delete a cancelled or completed appointment (admin only)
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
+  // Check admin role
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single()
+
+  if (profile?.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
+  // Guard: only allow deleting cancelled or completed appointments
+  const { data: appointment } = await supabase
+    .from("appointments")
+    .select("status")
+    .eq("id", id)
+    .single()
+
+  if (!appointment) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 })
+  }
+
+  if (appointment.status === "confirmed") {
+    return NextResponse.json({ error: "Cannot delete a confirmed appointment" }, { status: 409 })
+  }
+
+  const { error } = await supabase.from("appointments").delete().eq("id", id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return new NextResponse(null, { status: 204 })
+}

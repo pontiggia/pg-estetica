@@ -27,6 +27,7 @@ import {
   ShieldBan,
   X,
   Loader2,
+  Trash2,
 } from 'lucide-react';
 import { AdminLayout } from '@/components/admin-layout';
 import {
@@ -80,7 +81,7 @@ function generateTimeLabels(): string[] {
 }
 
 export default function CalendarioPage() {
-  const { appointments, loading: appointmentsLoading } = useAppointments();
+  const { appointments, loading: appointmentsLoading, deleteAppointment } = useAppointments();
   const { availability, loading: availabilityLoading } = useAvailability();
   const {
     overrides,
@@ -92,6 +93,7 @@ export default function CalendarioPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedAppointment, setSelectedAppointment] =
     useState<Appointment | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const loading =
     appointmentsLoading || availabilityLoading || overridesLoading;
@@ -725,11 +727,55 @@ export default function CalendarioPage() {
             </div>
           )}
 
+          {selectedAppointment &&
+            (selectedAppointment.status === 'cancelled' ||
+              selectedAppointment.status === 'completed') && (
+              <Button
+                variant="outline"
+                className="mt-2 w-full text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
+                onClick={() => {
+                  setDeleteId(selectedAppointment.id);
+                  setSelectedAppointment(null);
+                }}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Eliminar turno
+              </Button>
+            )}
+
           <DialogClose asChild>
             <Button variant="outline" className="mt-2 w-full">
               Cerrar
             </Button>
           </DialogClose>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Eliminar turno</DialogTitle>
+            <DialogDescription>
+              Esta accion es permanente. El turno sera eliminado y el horario quedara libre para nuevas reservas.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <DialogClose asChild>
+              <Button variant="outline">Volver</Button>
+            </DialogClose>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (deleteId) {
+                  await deleteAppointment(deleteId);
+                  setDeleteId(null);
+                }
+              }}
+            >
+              Eliminar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
