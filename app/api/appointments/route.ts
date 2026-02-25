@@ -83,7 +83,13 @@ export async function POST(request: Request) {
     .select()
     .single()
 
-  if (aptError) return NextResponse.json({ error: aptError.message }, { status: 500 })
+  if (aptError) {
+    // Unique constraint violation — another booking won the race
+    if (aptError.code === "23505") {
+      return NextResponse.json({ error: "Time slot already taken" }, { status: 409 })
+    }
+    return NextResponse.json({ error: aptError.message }, { status: 500 })
+  }
 
   // Link treatments
   const treatmentLinks = treatment_ids.map((tid: string) => ({

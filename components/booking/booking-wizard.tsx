@@ -50,6 +50,7 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [submitting, setSubmitting] = useState(false);
   const [phone, setPhone] = useState('');
+  const [bookingError, setBookingError] = useState<string | null>(null);
 
   const { activeTreatments, loading: treatmentsLoading } = useTreatments();
   const { profile } = useProfile();
@@ -57,7 +58,7 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
   const { overrides, loading: overridesLoading } = useOverrides();
 
   const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null;
-  const { slots: availableSlots, loading: slotsLoading } =
+  const { slots: availableSlots, loading: slotsLoading, refetch: refetchSlots } =
     useAvailableSlots(dateStr);
 
   // Build a set of active weekdays and full-day-blocked dates once (client-side)
@@ -128,8 +129,9 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
     const endTime = `${endH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 
     setSubmitting(true);
+    setBookingError(null);
     try {
-      await fetch('/api/appointments', {
+      const res = await fetch('/api/appointments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -141,9 +143,19 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
           created_by: profile.id,
         }),
       });
-      setStep(4);
+
+      if (res.ok) {
+        setStep(4);
+      } else if (res.status === 409) {
+        setBookingError('Este horario ya fue reservado. Por favor, elegí otro.');
+        setSelectedTime(null);
+        refetchSlots();
+        setStep(2);
+      } else {
+        setBookingError('Ocurrió un error al reservar. Intentá de nuevo.');
+      }
     } catch {
-      // Could show error toast here
+      setBookingError('Error de conexión. Intentá de nuevo.');
     } finally {
       setSubmitting(false);
     }
@@ -275,6 +287,12 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
             <ArrowLeft className="h-4 w-4" />
             Cambiar fecha
           </button>
+
+          {bookingError && (
+            <div className="mb-4 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {bookingError}
+            </div>
+          )}
 
           <h2 className="mb-1 font-serif text-xl text-foreground">
             Horarios disponibles
