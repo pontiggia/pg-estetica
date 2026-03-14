@@ -343,8 +343,8 @@ export function useProfile() {
 // Available slots for a specific date
 // ---------------------------------------------------------------------------
 
-export function useAvailableSlots(date: string | null) {
-  const url = date ? `/api/slots?date=${date}` : null;
+export function useAvailableSlots(date: string | null, includeExtra = false) {
+  const url = date ? `/api/slots?date=${date}${includeExtra ? '&include_extra=true' : ''}` : null;
   const { data, loading, error, refetch } = useApiFetch<{
     slots: string[];
     available: boolean;

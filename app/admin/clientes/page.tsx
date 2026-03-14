@@ -75,6 +75,7 @@ export default function ClientesPage() {
 
   const { slots: availableSlots, loading: slotsLoading } = useAvailableSlots(
     apptDate || null,
+    true,
   );
 
   const loading = clientsLoading || appointmentsLoading;

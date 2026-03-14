@@ -57,6 +57,22 @@ export async function GET(request: NextRequest) {
     (appointments ?? []).map((a) => a.start_time.slice(0, 5)),
   );
 
+  // Helper to check if a time is blocked by overrides
+  const isTimeBlocked = (timeStr: string, minutesFromMidnight: number) => {
+    return overrides?.some((o) => {
+      if (!o.is_blocked) return false;
+      if (o.blocked_slots && o.blocked_slots.length > 0) {
+        return o.blocked_slots.some((s: string) => s.slice(0, 5) === timeStr);
+      }
+      if (!o.start_time || !o.end_time) return false;
+      const [oSH, oSM] = o.start_time.split(':').map(Number);
+      const [oEH, oEM] = o.end_time.split(':').map(Number);
+      const oStart = oSH * 60 + oSM;
+      const oEnd = oEH * 60 + oEM;
+      return minutesFromMidnight >= oStart && minutesFromMidnight < oEnd;
+    });
+  };
+
   // Generate 75-minute interval slots (60min appointment + 15min buffer)
   const [startH, startM] = availData.start_time.split(':').map(Number);
   const [endH, endM] = availData.end_time.split(':').map(Number);
@@ -71,25 +87,33 @@ export async function GET(request: NextRequest) {
     const m = current % 60;
     const timeStr = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 
-    // Check if blocked by override
-    const isBlocked = overrides?.some((o) => {
-      if (!o.is_blocked) return false;
-      if (o.blocked_slots && o.blocked_slots.length > 0) {
-        return o.blocked_slots.some((s: string) => s.slice(0, 5) === timeStr);
-      }
-      if (!o.start_time || !o.end_time) return false;
-      const [oSH, oSM] = o.start_time.split(':').map(Number);
-      const [oEH, oEM] = o.end_time.split(':').map(Number);
-      const oStart = oSH * 60 + oSM;
-      const oEnd = oEH * 60 + oEM;
-      return current >= oStart && current < oEnd;
-    });
-
-    if (!isBlocked && !takenSlots.has(timeStr)) {
+    if (!isTimeBlocked(timeStr, current) && !takenSlots.has(timeStr)) {
       slots.push(timeStr);
     }
 
     current += 75;
+  }
+
+  // Include extra slots (admin-only, outside normal range) when requested
+  const includeExtra = request.nextUrl.searchParams.get('include_extra') === 'true';
+  if (includeExtra) {
+    const { data: extraSlots } = await supabase
+      .from('availability_extra_slots')
+      .select('time_slot')
+      .eq('day_of_week', dayOfWeek)
+      .eq('is_active', true);
+
+    for (const extra of extraSlots ?? []) {
+      const timeStr = extra.time_slot.slice(0, 5);
+      const [eH, eM] = timeStr.split(':').map(Number);
+      const extraMinutes = eH * 60 + eM;
+
+      if (!isTimeBlocked(timeStr, extraMinutes) && !takenSlots.has(timeStr)) {
+        slots.push(timeStr);
+      }
+    }
+
+    slots.sort();
   }
 
   return NextResponse.json({ slots, available: true });
