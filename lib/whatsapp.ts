@@ -44,7 +44,7 @@ async function sendTemplate(templateName: string, params: string[]): Promise<voi
   }
 
   const res = await fetch(
-    `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
+    `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
     {
       method: "POST",
       headers: {
