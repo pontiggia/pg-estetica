@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
+import { notifyCancelledAppointment } from "@/lib/whatsapp"
 import { NextResponse } from "next/server"
 
 // GET /api/appointments/:id - Get single appointment with details
@@ -64,6 +65,30 @@ export async function PATCH(
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // WhatsApp notification on cancellation (fire-and-forget)
+  if (data.status === "cancelled") {
+    const { data: details } = await supabase
+      .from("appointments")
+      .select(`
+        date, start_time,
+        client:profiles!appointments_client_id_fkey(full_name, phone)
+      `)
+      .eq("id", id)
+      .single()
+
+    if (details?.client) {
+      const client = details.client as unknown as { full_name: string; phone: string | null }
+      const phone = (client.phone || "").replace(/[^0-9]/g, "")
+      notifyCancelledAppointment({
+        clientName: client.full_name,
+        date: details.date,
+        time: details.start_time,
+        clientPhone: phone,
+      })
+    }
+  }
+
   return NextResponse.json(data)
 }
 

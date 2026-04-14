@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
+import { notifyNewAppointment } from "@/lib/whatsapp"
 import { NextRequest, NextResponse } from "next/server"
 
 // GET /api/appointments - List appointments (filtered by query params)
@@ -105,6 +106,32 @@ export async function POST(request: Request) {
     // Rollback the appointment if treatment linking fails
     await supabase.from("appointments").delete().eq("id", appointment.id)
     return NextResponse.json({ error: linkError.message }, { status: 500 })
+  }
+
+  // WhatsApp notification (fire-and-forget)
+  const { data: details } = await supabase
+    .from("appointments")
+    .select(`
+      date, start_time,
+      client:profiles!appointments_client_id_fkey(full_name, phone),
+      treatments:appointment_treatments(treatment:treatments(name))
+    `)
+    .eq("id", appointment.id)
+    .single()
+
+  if (details?.client) {
+    const client = details.client as unknown as { full_name: string; phone: string | null }
+    const treatments = (details.treatments as unknown as Array<{ treatment: { name: string } }>)
+      ?.map((at) => at.treatment.name)
+      .join(", ") || "—"
+    const phone = (client.phone || "").replace(/[^0-9]/g, "")
+    notifyNewAppointment({
+      clientName: client.full_name,
+      date: details.date,
+      time: details.start_time,
+      treatments,
+      clientPhone: phone,
+    })
   }
 
   return NextResponse.json(appointment, { status: 201 })
