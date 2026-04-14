@@ -109,7 +109,8 @@ export async function POST(request: Request) {
   }
 
   // WhatsApp notification (fire-and-forget)
-  const { data: details } = await supabase
+  console.log("[WhatsApp] Fetching appointment details for:", appointment.id)
+  const { data: details, error: detailsError } = await supabase
     .from("appointments")
     .select(`
       date, start_time,
@@ -118,6 +119,10 @@ export async function POST(request: Request) {
     `)
     .eq("id", appointment.id)
     .single()
+
+  if (detailsError) {
+    console.error("[WhatsApp] Details query failed:", detailsError.message)
+  }
 
   if (details?.client) {
     const client = details.client as unknown as { full_name: string; phone: string | null }

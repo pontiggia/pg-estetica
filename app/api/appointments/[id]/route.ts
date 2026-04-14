@@ -68,7 +68,8 @@ export async function PATCH(
 
   // WhatsApp notification on cancellation (fire-and-forget)
   if (data.status === "cancelled") {
-    const { data: details } = await supabase
+    console.log("[WhatsApp] Appointment cancelled, fetching details for:", id)
+    const { data: details, error: detailsError } = await supabase
       .from("appointments")
       .select(`
         date, start_time,
@@ -76,6 +77,10 @@ export async function PATCH(
       `)
       .eq("id", id)
       .single()
+
+    if (detailsError) {
+      console.error("[WhatsApp] Details query failed:", detailsError.message)
+    }
 
     if (details?.client) {
       const client = details.client as unknown as { full_name: string; phone: string | null }

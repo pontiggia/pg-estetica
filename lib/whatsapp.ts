@@ -21,9 +21,11 @@ async function sendTemplate(templateName: string, params: string[]): Promise<voi
   const adminPhone = process.env.WHATSAPP_ADMIN_PHONE
 
   if (!token || !phoneNumberId || !adminPhone) {
-    console.warn("[WhatsApp] Missing env vars, skipping notification")
+    console.warn("[WhatsApp] Missing env vars:", { token: !!token, phoneNumberId: !!phoneNumberId, adminPhone: !!adminPhone })
     return
   }
+
+  console.log("[WhatsApp] Sending template:", templateName, "to:", adminPhone, "params:", params)
 
   const body: WhatsAppTemplateMessage = {
     messaging_product: "whatsapp",
@@ -56,6 +58,9 @@ async function sendTemplate(templateName: string, params: string[]): Promise<voi
   if (!res.ok) {
     const err = await res.text()
     console.error("[WhatsApp] Send failed:", res.status, err)
+  } else {
+    const result = await res.json()
+    console.log("[WhatsApp] Send success:", JSON.stringify(result))
   }
 }
 
