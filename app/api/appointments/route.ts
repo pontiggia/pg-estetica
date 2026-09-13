@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
-import { notifyNewAppointment } from "@/lib/whatsapp"
+import { notifyNewAppointment, sendClientConfirmation } from "@/lib/whatsapp"
 import { NextRequest, NextResponse } from "next/server"
 
 // GET /api/appointments - List appointments (filtered by query params)
@@ -51,11 +51,29 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const body = await request.json()
-  const { client_id, date, start_time, end_time, treatment_ids, notes } = body
+  const { client_id, date, start_time, end_time, treatment_ids, notes, policy_accepted } = body
 
   if (!client_id || !date || !start_time || !end_time || !treatment_ids?.length) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
   }
+
+  const { data: requester } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single()
+  const isAdmin = requester?.role === "admin"
+
+  // Patients booking for themselves must explicitly accept the cancellation
+  // policy. Admins creating appointments on behalf of a patient are exempt
+  // (the acceptance timestamp stays null for those).
+  if (!isAdmin && policy_accepted !== true) {
+    return NextResponse.json(
+      { error: "Debés aceptar la política de turnos y cancelaciones para reservar." },
+      { status: 400 },
+    )
+  }
+  const policyAcceptedAt = policy_accepted === true ? new Date().toISOString() : null
 
   // Check for time conflicts (same date + overlapping time + confirmed)
   const { data: conflicts } = await supabase
@@ -80,6 +98,7 @@ export async function POST(request: Request) {
       notes: notes || null,
       created_by: user.id,
       status: "confirmed",
+      policy_accepted_at: policyAcceptedAt,
     })
     .select()
     .single()
@@ -108,35 +127,51 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: linkError.message }, { status: 500 })
   }
 
-  // WhatsApp notification (fire-and-forget)
-  console.log("[WhatsApp] Fetching appointment details for:", appointment.id)
-  const { data: details, error: detailsError } = await supabase
-    .from("appointments")
-    .select(`
-      date, start_time,
-      client:profiles!appointments_client_id_fkey(full_name, phone),
-      treatments:appointment_treatments(treatment:treatments(name))
-    `)
-    .eq("id", appointment.id)
-    .single()
+  // WhatsApp notifications (fire-and-forget). Any failure here is logged only:
+  // the appointment is already booked and must never be affected.
+  try {
+    console.log("[WhatsApp] Fetching appointment details for:", appointment.id)
+    const { data: details, error: detailsError } = await supabase
+      .from("appointments")
+      .select(`
+        date, start_time,
+        client:profiles!appointments_client_id_fkey(full_name, phone),
+        treatments:appointment_treatments(treatment:treatments(name))
+      `)
+      .eq("id", appointment.id)
+      .single()
 
-  if (detailsError) {
-    console.error("[WhatsApp] Details query failed:", detailsError.message)
-  }
+    if (detailsError) {
+      console.error("[WhatsApp] Details query failed:", detailsError.message)
+    }
 
-  if (details?.client) {
-    const client = details.client as unknown as { full_name: string; phone: string | null }
-    const treatments = (details.treatments as unknown as Array<{ treatment: { name: string } }>)
-      ?.map((at) => at.treatment.name)
-      .join(", ") || "—"
-    const phone = (client.phone || "").replace(/[^0-9]/g, "")
-    notifyNewAppointment({
-      clientName: client.full_name,
-      date: details.date,
-      time: details.start_time,
-      treatments,
-      clientPhone: phone,
-    })
+    if (details?.client) {
+      const client = details.client as unknown as { full_name: string; phone: string | null }
+      const treatments = (details.treatments as unknown as Array<{ treatment: { name: string } }>)
+        ?.map((at) => at.treatment.name)
+        .join(", ") || "—"
+      const phoneDigits = (client.phone || "").replace(/[^0-9]/g, "")
+
+      // 1) Notify Paula (admin) about the new appointment
+      notifyNewAppointment({
+        clientName: client.full_name,
+        date: details.date,
+        time: details.start_time,
+        treatments,
+        clientPhone: phoneDigits,
+      })
+
+      // 2) Confirmation to the patient
+      sendClientConfirmation({
+        clientName: client.full_name,
+        clientPhone: client.phone,
+        date: details.date,
+        time: details.start_time,
+        treatments,
+      }).catch((err) => console.error("[WhatsApp] sendClientConfirmation error:", err))
+    }
+  } catch (err) {
+    console.error("[WhatsApp] Notification step failed:", err)
   }
 
   return NextResponse.json(appointment, { status: 201 })

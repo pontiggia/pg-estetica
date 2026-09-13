@@ -30,6 +30,8 @@ export interface Appointment {
   status: AppointmentStatus
   notes: string | null
   created_by: string | null
+  policy_accepted_at: string | null
+  reminder_sent_at: string | null
   created_at: string
   updated_at: string
   client?: Profile

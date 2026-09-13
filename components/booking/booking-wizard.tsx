@@ -38,6 +38,12 @@ import { Input } from '@/components/ui/input';
 
 type Step = 1 | 2 | 3 | 4;
 
+export const POLICY_CHECKBOX_TEXT =
+  'Leí y acepto la política de turnos y cancelaciones, y autorizo el envío de confirmaciones y recordatorios por WhatsApp. Las cancelaciones o reprogramaciones deben realizarse con al menos 24 horas de anticipación.';
+
+export const CANCELLATION_POLICY_TEXT =
+  'Política de cancelación: los turnos deben cancelarse o reprogramarse con al menos 24 horas de anticipación. Fuera de ese plazo, el turno deberá ser abonado. En sesiones incluidas en un pack, la sesión se considerará utilizada.';
+
 interface BookingWizardProps {
   onComplete: () => void;
 }
@@ -51,6 +57,7 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
   const [submitting, setSubmitting] = useState(false);
   const [phone, setPhone] = useState('');
   const [bookingError, setBookingError] = useState<string | null>(null);
+  const [policyAccepted, setPolicyAccepted] = useState(false);
 
   const { activeTreatments, loading: treatmentsLoading } = useTreatments();
   const { profile } = useProfile();
@@ -111,7 +118,8 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
       !selectedTime ||
       selectedTreatments.length === 0 ||
       !profile ||
-      !phone.trim()
+      !phone.trim() ||
+      !policyAccepted
     )
       return;
 
@@ -141,6 +149,7 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
           end_time: endTime,
           treatment_ids: selectedTreatments,
           created_by: profile.id,
+          policy_accepted: true,
         }),
       });
 
@@ -159,7 +168,15 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
     } finally {
       setSubmitting(false);
     }
-  }, [selectedDate, selectedTime, selectedTreatments, profile, phone]);
+  }, [
+    selectedDate,
+    selectedTime,
+    selectedTreatments,
+    profile,
+    phone,
+    policyAccepted,
+    refetchSlots,
+  ]);
 
   const isDateSelectable = useCallback(
     (day: Date) => {
@@ -353,6 +370,12 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
             Cambiar horario
           </button>
 
+          {bookingError && (
+            <div className="mb-4 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {bookingError}
+            </div>
+          )}
+
           <h2 className="mb-1 font-serif text-xl text-foreground">
             Selecciona tratamiento(s)
           </h2>
@@ -409,11 +432,34 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
             </p>
           </div>
 
+          <label
+            htmlFor="policy-accepted"
+            className={cn(
+              'mt-6 flex cursor-pointer items-start gap-3 rounded-lg border px-4 py-3 transition-colors duration-200',
+              policyAccepted
+                ? 'border-primary/50 bg-primary/5'
+                : 'border-border hover:bg-muted/50',
+            )}
+          >
+            <Checkbox
+              id="policy-accepted"
+              checked={policyAccepted}
+              onCheckedChange={(checked) => setPolicyAccepted(checked === true)}
+              className="mt-0.5"
+            />
+            <span className="text-xs leading-relaxed text-foreground">
+              {POLICY_CHECKBOX_TEXT}
+            </span>
+          </label>
+
           <Button
-            className="mt-6 w-full bg-primary text-primary-foreground hover:bg-primary/90"
+            className="mt-4 w-full bg-primary text-primary-foreground hover:bg-primary/90"
             size="lg"
             disabled={
-              selectedTreatments.length === 0 || !phone.trim() || submitting
+              selectedTreatments.length === 0 ||
+              !phone.trim() ||
+              !policyAccepted ||
+              submitting
             }
             onClick={handleConfirm}
           >
@@ -452,6 +498,13 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
                 </span>
               ) : null;
             })}
+          </div>
+          <p className="mb-6 text-sm text-muted-foreground">
+            Te enviamos la confirmación por WhatsApp y vas a recibir un
+            recordatorio 24 horas antes del turno.
+          </p>
+          <div className="mb-6 rounded-lg border border-border bg-muted/40 px-4 py-3 text-left text-xs leading-relaxed text-muted-foreground">
+            {CANCELLATION_POLICY_TEXT}
           </div>
           <Button
             className="bg-primary text-primary-foreground hover:bg-primary/90"

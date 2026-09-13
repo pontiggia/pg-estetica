@@ -142,6 +142,7 @@ export function useAppointments(params?: {
       end_time: string;
       treatment_ids: string[];
       notes?: string;
+      policy_accepted?: boolean;
     }) => {
       const res = await fetch('/api/appointments', {
         method: 'POST',
