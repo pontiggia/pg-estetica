@@ -1,14 +1,12 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { argentinaDateString, argentinaDateTimeToUtc } from "@/lib/timezone"
+import { argentinaDateString } from "@/lib/timezone"
 import { sendClientReminder } from "@/lib/whatsapp"
 import { NextRequest, NextResponse } from "next/server"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
-const HOUR_MS = 60 * 60 * 1000
-const WINDOW_START_HOURS = 23
-const WINDOW_END_HOURS = 25
+const DAY_MS = 24 * 60 * 60 * 1000
 
 interface PendingReminder {
   id: string
@@ -21,9 +19,11 @@ interface PendingReminder {
 /**
  * GET /api/cron/reminders
  *
- * Sends the ~24h WhatsApp reminder to patients with a confirmed appointment
- * starting between 23 and 25 hours from now (Argentina time). Meant to be
- * invoked hourly by Vercel Cron. Protected with `Authorization: Bearer CRON_SECRET`.
+ * Sends the WhatsApp reminder to patients with a confirmed appointment on the
+ * next calendar day (Argentina time). Meant to be invoked once a day by Vercel
+ * Cron (Hobby plans only allow daily crons); scheduled in the morning so the
+ * reminder arrives roughly 24 hours before the appointment.
+ * Protected with `Authorization: Bearer CRON_SECRET`.
  *
  * Each appointment is "claimed" by setting reminder_sent_at before sending, so
  * two overlapping runs can never send the same reminder twice. If WhatsApp
@@ -47,11 +47,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Supabase admin client not configured" }, { status: 500 })
   }
 
-  const now = new Date()
-  const windowStart = new Date(now.getTime() + WINDOW_START_HOURS * HOUR_MS)
-  const windowEnd = new Date(now.getTime() + WINDOW_END_HOURS * HOUR_MS)
+  const tomorrow = argentinaDateString(new Date(Date.now() + DAY_MS))
 
-  // Coarse filter by calendar date (indexed), then exact filter by instant.
   const { data, error } = await supabase
     .from("appointments")
     .select(`
@@ -61,20 +58,16 @@ export async function GET(request: NextRequest) {
     `)
     .eq("status", "confirmed")
     .is("reminder_sent_at", null)
-    .gte("date", argentinaDateString(windowStart))
-    .lte("date", argentinaDateString(windowEnd))
+    .eq("date", tomorrow)
+    .order("start_time", { ascending: true })
 
   if (error) {
     console.error("[Reminders] Query failed:", error.message)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const candidates = ((data ?? []) as unknown as PendingReminder[]).filter((apt) => {
-    const startsAt = argentinaDateTimeToUtc(apt.date, apt.start_time)
-    return startsAt >= windowStart && startsAt <= windowEnd
-  })
-
-  const summary = { checked: candidates.length, sent: 0, skipped: 0, failed: 0 }
+  const candidates = (data ?? []) as unknown as PendingReminder[]
+  const summary = { date: tomorrow, checked: candidates.length, sent: 0, skipped: 0, failed: 0 }
 
   for (const apt of candidates) {
     if (!apt.client) {
@@ -114,7 +107,7 @@ export async function GET(request: NextRequest) {
       summary.sent++
     } else {
       summary.failed++
-      // Release the claim so the next hourly run can retry while still inside the window.
+      // Release the claim so a later run (or a manual re-run) can retry.
       const { error: releaseError } = await supabase
         .from("appointments")
         .update({ reminder_sent_at: null })
