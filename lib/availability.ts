@@ -37,7 +37,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/
 
 export function isValidDate(date: unknown): date is string {
-  if (typeof date !== "string" || !DATE_RE.test(date)) return false
+  if (typeof date !== "string" || !DATE_RE.test(date) || date < "2000") return false
   const parsed = new Date(`${date}T00:00:00Z`)
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(date)
 }

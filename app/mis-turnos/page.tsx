@@ -23,6 +23,8 @@ export default function MisTurnosPage() {
     profile?.id ? { client_id: profile.id } : undefined
   )
   const [cancelId, setCancelId] = useState<string | null>(null)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelError, setCancelError] = useState<string | null>(null)
 
   const loading = profileLoading || appointmentsLoading
 
@@ -39,10 +41,22 @@ export default function MisTurnosPage() {
   const upcoming = myAppointments.filter((a) => a.status === "confirmed")
   const past = myAppointments.filter((a) => a.status !== "confirmed")
 
+  const closeCancelDialog = () => {
+    setCancelId(null)
+    setCancelError(null)
+  }
+
   const handleCancel = async () => {
-    if (cancelId) {
+    if (!cancelId || cancelling) return
+    setCancelling(true)
+    setCancelError(null)
+    try {
       await updateAppointmentStatus(cancelId, "cancelled", "Cancelado por la clienta")
-      setCancelId(null)
+      closeCancelDialog()
+    } catch (err) {
+      setCancelError(err instanceof Error ? err.message : "No se pudo cancelar el turno")
+    } finally {
+      setCancelling(false)
     }
   }
 
@@ -114,7 +128,7 @@ export default function MisTurnosPage() {
       </div>
 
       {/* Cancel dialog */}
-      <Dialog open={!!cancelId} onOpenChange={() => setCancelId(null)}>
+      <Dialog open={!!cancelId} onOpenChange={closeCancelDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Cancelar turno</DialogTitle>
@@ -122,6 +136,11 @@ export default function MisTurnosPage() {
               Estas segura de que queres cancelar este turno? Esta accion no se puede deshacer.
             </DialogDescription>
           </DialogHeader>
+          {cancelError && (
+            <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {cancelError}
+            </div>
+          )}
           <DialogFooter>
             <DialogClose asChild>
               <Button variant="outline">Volver</Button>
@@ -129,7 +148,9 @@ export default function MisTurnosPage() {
             <Button
               variant="destructive"
               onClick={handleCancel}
+              disabled={cancelling}
             >
+              {cancelling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Cancelar turno
             </Button>
           </DialogFooter>

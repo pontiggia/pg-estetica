@@ -77,6 +77,7 @@ export default function ClientesPage() {
   const {
     slots: availableSlots,
     loading: slotsLoading,
+    error: slotsError,
     refetch: refetchSlots,
   } = useAvailableSlots(apptDate || null, true);
 
@@ -522,6 +523,10 @@ export default function ClientesPage() {
                   <div className="flex items-center justify-center py-4">
                     <Loader2 className="h-5 w-5 animate-spin text-primary" />
                   </div>
+                ) : slotsError ? (
+                  <p className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-3 text-center text-sm text-destructive">
+                    No se pudieron cargar los horarios: {slotsError}
+                  </p>
                 ) : availableSlots.length === 0 ? (
                   <p className="rounded-lg border bg-muted/30 px-3 py-3 text-center text-sm text-muted-foreground">
                     No hay horarios disponibles en esta fecha.

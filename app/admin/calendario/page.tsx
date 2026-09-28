@@ -99,6 +99,7 @@ export default function CalendarioPage() {
   const [selectedAppointment, setSelectedAppointment] =
     useState<Appointment | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [unblockDayDate, setUnblockDayDate] = useState<string | null>(null);
 
   const loading =
     appointmentsLoading || availabilityLoading || overridesLoading;
@@ -267,7 +268,20 @@ export default function CalendarioPage() {
     setBlockReason('');
   };
 
-  const confirmBlock = async () => {
+  // Block changes are made one at a time: each one starts from the current
+  // list of blocks, so overlapping clicks could otherwise undo each other.
+  const [savingBlocks, setSavingBlocks] = useState(false);
+  const withBlocksSaving = async (change: () => Promise<void>) => {
+    if (savingBlocks) return;
+    setSavingBlocks(true);
+    try {
+      await change();
+    } finally {
+      setSavingBlocks(false);
+    }
+  };
+
+  const confirmBlock = () => withBlocksSaving(async () => {
     if (!blockModal.date) return;
     if (blockModal.slot) {
       const existing = overrides.find(
@@ -277,7 +291,8 @@ export default function CalendarioPage() {
           o.blocked_slots.length > 0,
       );
       if (existing) {
-        await deleteOverride(existing.id);
+        // Save the merged list before removing the old one, so a failed
+        // request never loses the existing blocks
         await addOverride({
           date: blockModal.date,
           start_time: null,
@@ -288,6 +303,7 @@ export default function CalendarioPage() {
             ...new Set([...existing.blocked_slots, blockModal.slot]),
           ].sort(),
         });
+        await deleteOverride(existing.id);
       } else {
         await addOverride({
           date: blockModal.date,
@@ -310,9 +326,9 @@ export default function CalendarioPage() {
     }
     setBlockModal({ open: false, date: '', slot: null });
     setBlockReason('');
-  };
+  });
 
-  const handleUnblockDay = async (dateStr: string) => {
+  const handleUnblockDay = (dateStr: string) => withBlocksSaving(async () => {
     // Only the full-day block: blocks of specific slots stay in place
     const toRemove = overrides.filter(
       (o) => o.date === dateStr && isFullDayBlock(o),
@@ -320,32 +336,36 @@ export default function CalendarioPage() {
     for (const o of toRemove) {
       await deleteOverride(o.id);
     }
-  };
+  });
 
-  const handleUnblockSlot = async (dateStr: string, slot: string) => {
-    const existing = overrides.find(
-      (o) =>
-        o.date === dateStr &&
-        o.blocked_slots &&
-        o.blocked_slots.some((s) => normalizeTime(s) === slot),
-    );
-    if (existing) {
-      const newSlots = existing.blocked_slots.filter(
-        (s) => normalizeTime(s) !== slot,
+  const handleUnblockSlot = (dateStr: string, slot: string) =>
+    withBlocksSaving(async () => {
+      // The same slot can be blocked more than once (e.g. from Disponibilidad)
+      const containing = overrides.filter(
+        (o) =>
+          o.date === dateStr &&
+          o.blocked_slots &&
+          o.blocked_slots.some((s) => normalizeTime(s) === slot),
       );
-      await deleteOverride(existing.id);
-      if (newSlots.length > 0) {
-        await addOverride({
-          date: dateStr,
-          start_time: null,
-          end_time: null,
-          is_blocked: true,
-          reason: existing.reason,
-          blocked_slots: newSlots,
-        });
+      for (const existing of containing) {
+        const newSlots = existing.blocked_slots.filter(
+          (s) => normalizeTime(s) !== slot,
+        );
+        // Save the remaining slots before removing the old list, so a failed
+        // request never loses the other blocks
+        if (newSlots.length > 0) {
+          await addOverride({
+            date: dateStr,
+            start_time: null,
+            end_time: null,
+            is_blocked: true,
+            reason: existing.reason,
+            blocked_slots: newSlots,
+          });
+        }
+        await deleteOverride(existing.id);
       }
-    }
-  };
+    });
 
   const isDayOfWeekActive = useCallback(
     (dayOfWeek: number) => {
@@ -470,7 +490,7 @@ export default function CalendarioPage() {
                         <div className="mt-1 flex justify-center gap-1">
                           {dayBlocked ? (
                             <button
-                              onClick={() => handleUnblockDay(dateStr)}
+                              onClick={() => setUnblockDayDate(dateStr)}
                               className="flex items-center gap-0.5 rounded-md bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/20"
                               title="Desbloquear dia"
                             >
@@ -647,10 +667,10 @@ export default function CalendarioPage() {
                       </span>
 
                       {inMonth && isActive && (
-                        <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                        <div className="flex items-center gap-0.5 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                           {dayBlocked ? (
                             <button
-                              onClick={() => handleUnblockDay(dateStr)}
+                              onClick={() => setUnblockDayDate(dateStr)}
                               className="rounded p-0.5 text-destructive hover:bg-destructive/10"
                               title="Desbloquear"
                             >
@@ -850,6 +870,47 @@ export default function CalendarioPage() {
               Cerrar
             </Button>
           </DialogClose>
+        </DialogContent>
+      </Dialog>
+
+      {/* Unblock day confirmation */}
+      <Dialog
+        open={unblockDayDate !== null}
+        onOpenChange={(open) => {
+          if (!open) setUnblockDayDate(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Desbloquear dia</DialogTitle>
+            <DialogDescription>
+              {unblockDayDate &&
+                format(
+                  new Date(unblockDayDate + 'T12:00:00'),
+                  "EEEE d 'de' MMMM, yyyy",
+                  { locale: es },
+                )}
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Los clientes podran volver a reservar este dia. Los horarios
+            bloqueados uno por uno siguen bloqueados.
+          </p>
+          <DialogFooter className="gap-2">
+            <DialogClose asChild>
+              <Button variant="outline">Volver</Button>
+            </DialogClose>
+            <Button
+              onClick={async () => {
+                if (unblockDayDate) {
+                  await handleUnblockDay(unblockDayDate);
+                  setUnblockDayDate(null);
+                }
+              }}
+            >
+              Desbloquear
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

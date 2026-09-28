@@ -5,6 +5,9 @@ type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
 
 export const MAX_DATES_PER_REQUEST = 62
 
+// Booked times are only available to logged-in users
+export class NotSignedInError extends Error {}
+
 // Loads everything needed to compute the slots of the given dates.
 //
 // Patients can only read their own appointments (RLS), so booked times are
@@ -35,6 +38,7 @@ export async function loadDaySchedules(
   ])
 
   for (const result of [availability, overrides, extraSlots, booked]) {
+    if (result.error?.code === "42501") throw new NotSignedInError(result.error.message)
     if (result.error) {
       throw new Error(`Could not load availability: ${result.error.message}`)
     }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   format,
   isAfter,
@@ -47,6 +47,7 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
   const [selectedTreatments, setSelectedTreatments] = useState<string[]>([]);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [phone, setPhone] = useState('');
   const [bookingError, setBookingError] = useState<string | null>(null);
 
@@ -125,6 +126,7 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
 
   const handleConfirm = useCallback(async () => {
     if (
+      submittingRef.current ||
       !selectedDate ||
       !selectedTime ||
       selectedTreatments.length === 0 ||
@@ -133,22 +135,25 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
     )
       return;
 
-    // Save phone to profile if missing or changed
-    if (!profile.phone || profile.phone !== phone.trim()) {
-      await fetch('/api/profile', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: phone.trim() }),
-      });
-    }
-
-    const [h, m] = selectedTime.split(':').map(Number);
-    const endH = h + 1;
-    const endTime = `${endH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-
+    // Block a second click right away: otherwise both clicks book, the
+    // second one fails and its error hides the booking that did go through.
+    submittingRef.current = true;
     setSubmitting(true);
     setBookingError(null);
     try {
+      // Save phone to profile if missing or changed
+      if (!profile.phone || profile.phone !== phone.trim()) {
+        await fetch('/api/profile', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: phone.trim() }),
+        });
+      }
+
+      const [h, m] = selectedTime.split(':').map(Number);
+      const endH = h + 1;
+      const endTime = `${endH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+
       const res = await fetch('/api/appointments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -177,6 +182,7 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
     } catch {
       setBookingError('Error de conexión. Intentá de nuevo.');
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }, [selectedDate, selectedTime, selectedTreatments, profile, phone]);

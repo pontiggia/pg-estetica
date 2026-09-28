@@ -1,6 +1,9 @@
 import { createClient } from '@/lib/supabase/server';
 import { getAvailableSlots, isValidDate } from '@/lib/availability';
-import { loadDaySchedules } from '@/lib/availability-server';
+import {
+  loadDaySchedules,
+  NotSignedInError,
+} from '@/lib/availability-server';
 import { NextRequest, NextResponse } from 'next/server';
 
 // GET /api/slots?date=yyyy-mm-dd - Get available time slots for a date
@@ -23,6 +26,9 @@ export async function GET(request: NextRequest) {
     const slots = getAvailableSlots(schedules[date], includeExtra);
     return NextResponse.json({ slots, available: slots.length > 0 });
   } catch (error) {
+    if (error instanceof NotSignedInError) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     console.error('[Slots]', error);
     return NextResponse.json(
       { error: 'No se pudo verificar la disponibilidad' },

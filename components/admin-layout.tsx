@@ -116,8 +116,9 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      {/* Main content */}
-      <div className="flex flex-1 flex-col">
+      {/* Main content (min-w-0: wide content like the calendar scrolls inside
+          its own box instead of making the page wider than a phone screen) */}
+      <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-card/80 px-4 backdrop-blur-sm lg:px-6">
           <button
             onClick={() => setMobileOpen(true)}

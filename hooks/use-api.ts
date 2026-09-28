@@ -176,7 +176,12 @@ export function useAppointments(params?: {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error('Failed to update appointment');
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        // The appointment may have changed meanwhile: show its current state
+        await refetch();
+        throw new Error(err.error || 'Failed to update appointment');
+      }
       await refetch();
     },
     [refetch],

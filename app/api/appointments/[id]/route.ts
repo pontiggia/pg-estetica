@@ -59,7 +59,7 @@ export async function PATCH(
 
   const [{ data: profile }, { data: current }] = await Promise.all([
     supabase.from("profiles").select("role").eq("id", user.id).single(),
-    supabase.from("appointments").select("status").eq("id", id).single(),
+    supabase.from("appointments").select("*").eq("id", id).single(),
   ])
 
   if (!current) return NextResponse.json({ error: "Not found" }, { status: 404 })
@@ -71,17 +71,29 @@ export async function PATCH(
     if (updates.status !== "cancelled") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
+    // Already cancelled (e.g. by the admin while the page was open)
+    if (current.status === "cancelled") return NextResponse.json(current)
     if (current.status !== "confirmed") {
       return NextResponse.json({ error: "Solo se pueden cancelar turnos confirmados" }, { status: 409 })
     }
+    // Same rule "Mis turnos" shows: up to 24 hours before (Argentina, UTC-3)
+    const startsAt = new Date(`${current.date}T${current.start_time}-03:00`)
+    if (startsAt.getTime() - Date.now() < 24 * 60 * 60 * 1000) {
+      return NextResponse.json(
+        { error: "Los turnos se pueden cancelar hasta 24 horas antes" },
+        { status: 409 },
+      )
+    }
   }
 
-  const { data, error } = await supabase
+  // Only if the status did not change meanwhile, so that two simultaneous
+  // cancellations change (and notify) once
+  const { data: updated, error } = await supabase
     .from("appointments")
     .update(updates)
     .eq("id", id)
+    .eq("status", current.status)
     .select()
-    .single()
 
   if (error) {
     // Unique index violation — the slot was booked again meanwhile
@@ -89,6 +101,16 @@ export async function PATCH(
       return NextResponse.json({ error: "Este horario ya está reservado" }, { status: 409 })
     }
     return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  const data = updated?.[0]
+  if (!data) {
+    const { data: latest } = await supabase.from("appointments").select("*").eq("id", id).single()
+    if (latest && updates.status === latest.status) return NextResponse.json(latest)
+    return NextResponse.json(
+      { error: "El turno cambió mientras tanto. Recargá la página." },
+      { status: 409 },
+    )
   }
 
   // WhatsApp notification on cancellation (fire-and-forget)

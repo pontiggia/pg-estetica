@@ -1,8 +1,13 @@
 import { createClient } from '@/lib/supabase/server';
-import { getAvailableSlots, isValidDate } from '@/lib/availability';
+import {
+  getAvailableSlots,
+  isValidDate,
+  todayInArgentina,
+} from '@/lib/availability';
 import {
   loadDaySchedules,
   MAX_DATES_PER_REQUEST,
+  NotSignedInError,
 } from '@/lib/availability-server';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -28,12 +33,19 @@ export async function POST(request: NextRequest) {
 
   try {
     const schedules = await loadDaySchedules(supabase, dates);
+    // Bookings open from tomorrow on (Argentina time), whatever the
+    // browser's clock says
+    const today = todayInArgentina();
     const result: Record<string, boolean> = {};
     for (const date of dates) {
-      result[date] = getAvailableSlots(schedules[date]).length > 0;
+      result[date] =
+        date > today && getAvailableSlots(schedules[date]).length > 0;
     }
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof NotSignedInError) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     console.error('[Slots]', error);
     return NextResponse.json(
       { error: 'No se pudo verificar la disponibilidad' },

@@ -19,6 +19,10 @@ const UNAVAILABLE_SLOT_ERRORS: Record<Exclude<SlotStatus, "available">, string> 
   booked: "Este horario ya está reservado",
 }
 
+// Supabase returns at most "max rows" (1000 by default) rows per request, so
+// larger lists are read page by page.
+const MAX_PAGES = 50
+
 // GET /api/appointments - List appointments (filtered by query params)
 // ?client_id=xxx  - filter by client
 // ?date=yyyy-mm-dd - filter by date
@@ -26,34 +30,47 @@ const UNAVAILABLE_SLOT_ERRORS: Record<Exclude<SlotStatus, "available">, string> 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
   const { searchParams } = request.nextUrl
+  const clientId = searchParams.get("client_id")
+  const date = searchParams.get("date")
+  const status = searchParams.get("status")
 
-  let query = supabase
-    .from("appointments")
-    .select(`
+  const page = (offset: number) => {
+    let query = supabase
+      .from("appointments")
+      .select(
+        `
       *,
       client:profiles!appointments_client_id_fkey(id, full_name, email, phone),
       treatments:appointment_treatments(
         treatment:treatments(id, name)
       )
-    `)
-    .order("date", { ascending: true })
-    .order("start_time", { ascending: true })
+    `,
+        { count: "exact" },
+      )
+      .order("date", { ascending: true })
+      .order("start_time", { ascending: true })
+      // Unique tiebreaker so pages never overlap or skip rows
+      .order("id", { ascending: true })
+      .range(offset, offset + 999)
 
-  const clientId = searchParams.get("client_id")
-  if (clientId) query = query.eq("client_id", clientId)
+    if (clientId) query = query.eq("client_id", clientId)
+    if (date) query = query.eq("date", date)
+    if (status) query = query.eq("status", status)
+    return query
+  }
 
-  const date = searchParams.get("date")
-  if (date) query = query.eq("date", date)
-
-  const status = searchParams.get("status")
-  if (status) query = query.eq("status", status)
-
-  const { data, error } = await query
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  // Without this, once there are more appointments than one page holds, the
+  // newest ones (the upcoming appointments) silently disappear from the lists.
+  const data = []
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const { data: rows, count, error } = await page(data.length)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    data.push(...rows)
+    if (rows.length === 0 || data.length >= (count ?? 0)) break
+  }
 
   // Flatten the nested treatments structure
-  const formatted = data?.map((apt) => ({
+  const formatted = data.map((apt) => ({
     ...apt,
     treatments: apt.treatments?.map((at: { treatment: { id: string; name: string } }) => at.treatment) ?? [],
   }))

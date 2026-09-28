@@ -150,6 +150,7 @@ test("input validation", () => {
   assert.equal(isValidDate("2026-10-05"), true)
   assert.equal(isValidDate("2026-02-31"), false)
   assert.equal(isValidDate("2026-2-5"), false)
+  assert.equal(isValidDate("0000-01-01"), false)
   assert.equal(isValidDate(null), false)
   assert.equal(isValidTime("09:00"), true)
   assert.equal(isValidTime("09:00:00"), true)
@@ -168,7 +169,8 @@ test("weekday does not depend on the server timezone", () => {
       assert.equal(dayOfWeek("2026-10-09"), 5, tz) // Friday
     }
   } finally {
-    process.env.TZ = original
+    if (original === undefined) delete process.env.TZ
+    else process.env.TZ = original
   }
 })
 
