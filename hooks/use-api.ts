@@ -14,36 +14,38 @@ import type {
 // ---------------------------------------------------------------------------
 
 function useApiFetch<T>(url: string | null) {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // The result remembers which URL it belongs to, so data for a previous URL
+  // (e.g. the slots of the previously selected date) is never shown as current.
+  const [result, setResult] = useState<{
+    url: string;
+    data: T | null;
+    error: string | null;
+  } | null>(null);
   const urlRef = useRef(url);
   urlRef.current = url;
-  const initialised = useRef(false);
 
   const refetch = useCallback(async () => {
     const currentUrl = urlRef.current;
-    if (!currentUrl) {
-      setData(null);
-      setLoading(false);
-      return;
-    }
-    // Only show full loading spinner on first load
-    if (!initialised.current) setLoading(true);
-    setError(null);
+    if (!currentUrl) return;
     try {
-      const res = await fetch(currentUrl);
+      const res = await fetch(currentUrl, { cache: 'no-store' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
       const json = await res.json();
-      setData(json);
-      initialised.current = true;
+      // Ignore responses that arrive after the URL has changed
+      if (urlRef.current !== currentUrl) return;
+      setResult({ url: currentUrl, data: json, error: null });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setLoading(false);
+      if (urlRef.current !== currentUrl) return;
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      // Keep the last good data for this URL (refetch after a mutation)
+      setResult((prev) => ({
+        url: currentUrl,
+        data: prev?.url === currentUrl ? prev.data : null,
+        error: message,
+      }));
     }
   }, []);
 
@@ -51,7 +53,14 @@ function useApiFetch<T>(url: string | null) {
     refetch();
   }, [url, refetch]);
 
-  return { data, loading, error, refetch };
+  const current = result?.url === url ? result : null;
+  return {
+    data: current?.data ?? null,
+    // Only the first load of each URL shows a spinner; refetches keep the data
+    loading: url !== null && current === null,
+    error: current?.error ?? null,
+    refetch,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -364,7 +373,9 @@ export function useAvailableSlots(date: string | null, includeExtra = false) {
 
 export async function checkDateAvailability(date: string): Promise<boolean> {
   try {
-    const res = await fetch(`/api/slots/check?date=${date}`);
+    const res = await fetch(`/api/slots/check?date=${date}`, {
+      cache: 'no-store',
+    });
     if (!res.ok) return false;
     const json = await res.json();
     return json.available;
@@ -373,20 +384,19 @@ export async function checkDateAvailability(date: string): Promise<boolean> {
   }
 }
 
-// Batch check: returns a map of date → available for many dates in one call
+// Batch check: returns a map of date → has a free slot, for many dates in one
+// call. Throws if availability could not be checked, so callers can tell
+// "no free slots" apart from "could not load".
 export async function checkDatesAvailabilityBatch(
   dates: string[],
 ): Promise<Record<string, boolean>> {
   if (dates.length === 0) return {};
-  try {
-    const res = await fetch('/api/slots/check-batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dates }),
-    });
-    if (!res.ok) return {};
-    return await res.json();
-  } catch {
-    return {};
-  }
+  const res = await fetch('/api/slots/check-batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
+    body: JSON.stringify({ dates }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }

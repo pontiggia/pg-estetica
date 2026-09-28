@@ -1,10 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   format,
-  isBefore,
-  isToday,
+  isAfter,
   startOfDay,
   isSameMonth,
   addMonths,
@@ -28,9 +27,8 @@ import { cn } from '@/lib/utils';
 import {
   useTreatments,
   useAvailableSlots,
-  useAvailability,
-  useOverrides,
   useProfile,
+  checkDatesAvailabilityBatch,
 } from '@/hooks/use-api';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -54,33 +52,55 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
 
   const { activeTreatments, loading: treatmentsLoading } = useTreatments();
   const { profile } = useProfile();
-  const { availability, loading: availLoading } = useAvailability();
-  const { overrides, loading: overridesLoading } = useOverrides();
 
   const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null;
-  const { slots: availableSlots, loading: slotsLoading, refetch: refetchSlots } =
-    useAvailableSlots(dateStr);
+  const {
+    slots: availableSlots,
+    loading: slotsLoading,
+    error: slotsError,
+    refetch: refetchSlots,
+  } = useAvailableSlots(dateStr);
 
-  // Build a set of active weekdays and full-day-blocked dates once (client-side)
-  const activeDays = useMemo(
-    () =>
-      new Set(
-        availability.filter((a) => a.is_active).map((a) => a.day_of_week),
-      ),
-    [availability],
-  );
+  // Days of the visible month that still have a free slot. The server decides
+  // this, because only it can see every booking (patients only see their own)
+  // and every block.
+  const monthKey = format(currentMonth, 'yyyy-MM');
+  const [bookable, setBookable] = useState<{
+    month: string;
+    dates: Record<string, boolean>;
+  } | null>(null);
+  const [datesError, setDatesError] = useState(false);
+  const [datesReloadKey, setDatesReloadKey] = useState(0);
+  // Results of another month are never used for the visible one
+  const bookableDates = bookable?.month === monthKey ? bookable.dates : null;
 
-  const fullDayBlocked = useMemo(() => {
-    const blocked = new Set<string>();
-    for (const o of overrides) {
-      if (o.is_blocked && (!o.blocked_slots || o.blocked_slots.length === 0)) {
-        blocked.add(o.date);
-      }
-    }
-    return blocked;
-  }, [overrides]);
+  useEffect(() => {
+    // Reload every time the calendar is shown, so it is never stale
+    if (step !== 1) return;
 
-  const scheduleReady = !availLoading && !overridesLoading;
+    // Bookings open from tomorrow on
+    const today = startOfDay(new Date());
+    const dates = eachDayOfInterval({
+      start: startOfMonth(currentMonth),
+      end: endOfMonth(currentMonth),
+    })
+      .filter((day) => isAfter(day, today))
+      .map((day) => format(day, 'yyyy-MM-dd'));
+
+    let cancelled = false;
+    setDatesError(false);
+    checkDatesAvailabilityBatch(dates)
+      .then((result) => {
+        if (!cancelled) setBookable({ month: monthKey, dates: result });
+      })
+      .catch(() => {
+        if (!cancelled) setDatesError(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [step, currentMonth, monthKey, datesReloadKey]);
 
   // Calendar logic
   const monthStart = startOfMonth(currentMonth);
@@ -91,8 +111,6 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
     start: calendarStart,
     end: calendarEnd,
   });
-
-  const today = startOfDay(new Date());
 
   // Pre-fill phone from profile
   useEffect(() => {
@@ -147,7 +165,9 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
       if (res.ok) {
         setStep(4);
       } else if (res.status === 409) {
-        setBookingError('Este horario ya fue reservado. Por favor, elegí otro.');
+        setBookingError(
+          'Este horario ya no está disponible. Por favor, elegí otro.',
+        );
         setSelectedTime(null);
         refetchSlots();
         setStep(2);
@@ -163,16 +183,11 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
 
   const isDateSelectable = useCallback(
     (day: Date) => {
-      if (!scheduleReady) return false;
-      if (isBefore(day, today) || isToday(day)) return false;
+      if (!bookableDates || datesError) return false;
       if (!isSameMonth(day, currentMonth)) return false;
-      const dayOfWeek = day.getDay();
-      if (!activeDays.has(dayOfWeek)) return false;
-      const ds = format(day, 'yyyy-MM-dd');
-      if (fullDayBlocked.has(ds)) return false;
-      return true;
+      return bookableDates[format(day, 'yyyy-MM-dd')] === true;
     },
-    [currentMonth, today, scheduleReady, activeDays, fullDayBlocked],
+    [currentMonth, datesError, bookableDates],
   );
 
   return (
@@ -248,8 +263,13 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
                   key={day.toISOString()}
                   disabled={!selectable}
                   onClick={() => {
+                    // Same date again: its slots may have changed meanwhile
+                    if (selectedDate && isSameDay(day, selectedDate)) {
+                      refetchSlots();
+                    }
                     setSelectedDate(day);
                     setSelectedTime(null);
+                    setBookingError(null);
                     setStep(2);
                   }}
                   className={cn(
@@ -271,9 +291,26 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
             })}
           </div>
 
-          <p className="mt-4 text-center text-xs text-muted-foreground">
-            No se puede reservar para el dia de hoy
-          </p>
+          {datesError ? (
+            <div className="mt-4 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-center text-sm text-destructive">
+              No pudimos cargar los días disponibles.{' '}
+              <button
+                onClick={() => setDatesReloadKey((key) => key + 1)}
+                className="font-medium underline underline-offset-2"
+              >
+                Reintentar
+              </button>
+            </div>
+          ) : !bookableDates ? (
+            <p className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Buscando días disponibles...
+            </p>
+          ) : (
+            <p className="mt-4 text-center text-xs text-muted-foreground">
+              No se puede reservar para el dia de hoy
+            </p>
+          )}
         </div>
       )}
 
@@ -304,6 +341,19 @@ export function BookingWizard({ onComplete }: BookingWizardProps) {
           {slotsLoading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : slotsError ? (
+            <div className="py-8 text-center">
+              <p className="text-sm text-destructive">
+                No pudimos cargar los horarios.
+              </p>
+              <Button
+                variant="outline"
+                className="mt-4"
+                onClick={() => refetchSlots()}
+              >
+                Reintentar
+              </Button>
             </div>
           ) : availableSlots.length === 0 ? (
             <div className="py-8 text-center">
