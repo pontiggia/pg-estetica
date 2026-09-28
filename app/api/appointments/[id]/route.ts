@@ -57,6 +57,25 @@ export async function PATCH(
     return NextResponse.json({ error: "No fields to update" }, { status: 400 })
   }
 
+  const [{ data: profile }, { data: current }] = await Promise.all([
+    supabase.from("profiles").select("role").eq("id", user.id).single(),
+    supabase.from("appointments").select("status").eq("id", id).single(),
+  ])
+
+  if (!current) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  // Patients can only cancel their own confirmed appointments. Anything else
+  // (e.g. confirming a cancelled one again) could take a slot that has since
+  // been booked or blocked.
+  if (profile?.role !== "admin") {
+    if (updates.status !== "cancelled") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
+    if (current.status !== "confirmed") {
+      return NextResponse.json({ error: "Solo se pueden cancelar turnos confirmados" }, { status: 409 })
+    }
+  }
+
   const { data, error } = await supabase
     .from("appointments")
     .update(updates)
@@ -64,10 +83,16 @@ export async function PATCH(
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    // Unique index violation — the slot was booked again meanwhile
+    if (error.code === "23505") {
+      return NextResponse.json({ error: "Este horario ya está reservado" }, { status: 409 })
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
 
   // WhatsApp notification on cancellation (fire-and-forget)
-  if (data.status === "cancelled") {
+  if (data.status === "cancelled" && current.status !== "cancelled") {
     console.log("[WhatsApp] Appointment cancelled, fetching details for:", id)
     const { data: details, error: detailsError } = await supabase
       .from("appointments")
