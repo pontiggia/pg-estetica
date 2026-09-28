@@ -131,8 +131,9 @@ export async function POST(request: Request) {
     .single()
 
   if (aptError) {
-    // Unique index violation — another booking won the race
-    if (aptError.code === "23505") {
+    // 23505: unique index, another booking won the race. 23P01: the database
+    // booking guard (scripts/007) found the slot booked or blocked meanwhile.
+    if (aptError.code === "23505" || aptError.code === "23P01") {
       return NextResponse.json({ error: UNAVAILABLE_SLOT_ERRORS.booked }, { status: 409 })
     }
     return NextResponse.json({ error: aptError.message }, { status: 500 })
