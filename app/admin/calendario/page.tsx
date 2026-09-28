@@ -36,6 +36,13 @@ import {
   useOverrides,
 } from '@/hooks/use-api';
 import { cn } from '@/lib/utils';
+import {
+  generateDaySlots,
+  isFullDayBlock,
+  isSlotBlocked as overlapsBlock,
+  isSlotBooked as overlapsAppointment,
+  normalizeTime,
+} from '@/lib/availability';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -47,7 +54,11 @@ import {
   DialogFooter,
   DialogClose,
 } from '@/components/ui/dialog';
-import type { Appointment } from '@/lib/types';
+import type {
+  Appointment,
+  Availability,
+  AvailabilityOverride,
+} from '@/lib/types';
 
 type CalView = 'week' | 'month';
 
@@ -64,20 +75,14 @@ const statusLabels: Record<string, string> = {
   completed: 'Completado',
 };
 
-function generateTimeLabels(): string[] {
-  const START = 8 * 60 + 30;
-  const END = 20 * 60;
-  const labels: string[] = [];
-  let t = START;
-  while (t + 60 <= END) {
-    const h = Math.floor(t / 60);
-    const m = t % 60;
-    labels.push(
-      `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`,
-    );
-    t += 75;
-  }
-  return labels;
+// Several appointments can share a start time (e.g. a cancelled one and the
+// booking that replaced it): show the one that is still active.
+function pickAppointment(appts: Appointment[]): Appointment | undefined {
+  return (
+    appts.find((a) => a.status === 'confirmed') ??
+    appts.find((a) => a.status === 'completed') ??
+    appts[0]
+  );
 }
 
 export default function CalendarioPage() {
@@ -94,6 +99,7 @@ export default function CalendarioPage() {
   const [selectedAppointment, setSelectedAppointment] =
     useState<Appointment | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [unblockDayDate, setUnblockDayDate] = useState<string | null>(null);
 
   const loading =
     appointmentsLoading || availabilityLoading || overridesLoading;
@@ -107,7 +113,14 @@ export default function CalendarioPage() {
 
   const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
   const weekEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
-  const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
+  const weekDays = useMemo(
+    () =>
+      eachDayOfInterval({
+        start: startOfWeek(currentDate, { weekStartsOn: 1 }),
+        end: endOfWeek(currentDate, { weekStartsOn: 1 }),
+      }),
+    [currentDate],
+  );
 
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(currentDate);
@@ -117,8 +130,6 @@ export default function CalendarioPage() {
     start: monthCalStart,
     end: monthCalEnd,
   });
-
-  const timeLabels = useMemo(() => generateTimeLabels(), []);
 
   const appointmentsByDate = useMemo(() => {
     const map: Record<string, Appointment[]> = {};
@@ -135,20 +146,28 @@ export default function CalendarioPage() {
   const blockedMap = useMemo(() => {
     const map: Record<
       string,
-      { fullDay: boolean; slots: Set<string>; reason: string | null }
+      {
+        fullDay: boolean;
+        slots: Set<string>;
+        reason: string | null;
+        overrides: AvailabilityOverride[];
+      }
     > = {};
     overrides.forEach((o) => {
       if (!o.is_blocked) return;
       if (!map[o.date])
-        map[o.date] = { fullDay: false, slots: new Set(), reason: null };
-      if (
-        (!o.blocked_slots || o.blocked_slots.length === 0) &&
-        o.start_time === null
-      ) {
+        map[o.date] = {
+          fullDay: false,
+          slots: new Set(),
+          reason: null,
+          overrides: [],
+        };
+      map[o.date].overrides.push(o);
+      if (isFullDayBlock(o)) {
         map[o.date].fullDay = true;
         map[o.date].reason = o.reason;
       } else if (o.blocked_slots && o.blocked_slots.length > 0) {
-        o.blocked_slots.forEach((s) => map[o.date].slots.add(s));
+        o.blocked_slots.forEach((s) => map[o.date].slots.add(normalizeTime(s)));
         if (o.reason) map[o.date].reason = o.reason;
       }
     });
@@ -160,6 +179,7 @@ export default function CalendarioPage() {
     [blockedMap],
   );
 
+  // A slot the admin blocked explicitly (it can be unblocked from its cell)
   const isSlotBlocked = useCallback(
     (dateStr: string, slot: string) => {
       const entry = blockedMap[dateStr];
@@ -167,6 +187,48 @@ export default function CalendarioPage() {
       return entry.fullDay || entry.slots.has(slot);
     },
     [blockedMap],
+  );
+
+  const scheduleByDay = useMemo(() => {
+    const map = new Map<number, Availability>();
+    availability.forEach((a) => {
+      if (a.is_active) map.set(a.day_of_week, a);
+    });
+    return map;
+  }, [availability]);
+
+  // The slots patients see on a given day (same rule as the booking API)
+  const daySlots = useCallback(
+    (day: Date) => {
+      const schedule = scheduleByDay.get(day.getDay());
+      return schedule ? generateDaySlots(schedule) : [];
+    },
+    [scheduleByDay],
+  );
+
+  // Rows of the week grid: every slot of every day of the week, plus the
+  // start time of any appointment or block that is off that grid (e.g. an
+  // extra slot, or one made before the opening hours were changed), so
+  // nothing is ever hidden.
+  const weekRows = useMemo(() => {
+    const rows = new Set<string>();
+    for (const day of weekDays) {
+      const dateStr = format(day, 'yyyy-MM-dd');
+      daySlots(day).forEach((slot) => rows.add(slot));
+      (appointmentsByDate[dateStr] || []).forEach((a) =>
+        rows.add(normalizeTime(a.start_time)),
+      );
+      blockedMap[dateStr]?.slots.forEach((slot) => rows.add(slot));
+    }
+    return [...rows].sort();
+  }, [weekDays, daySlots, appointmentsByDate, blockedMap]);
+
+  const confirmedOn = useCallback(
+    (dateStr: string) =>
+      (appointmentsByDate[dateStr] || []).filter(
+        (a) => a.status === 'confirmed',
+      ),
+    [appointmentsByDate],
   );
 
   const navigate = (dir: number) => {
@@ -188,6 +250,14 @@ export default function CalendarioPage() {
       ? `${format(weekStart, 'd MMM', { locale: es })} - ${format(weekEnd, 'd MMM yyyy', { locale: es })}`
       : format(currentDate, 'MMMM yyyy', { locale: es });
 
+  // Confirmed appointments that the block being confirmed would cover
+  const affectedAppointments = blockModal.open
+    ? confirmedOn(blockModal.date).filter(
+        (a) =>
+          !blockModal.slot || overlapsAppointment(blockModal.slot, [a]),
+      )
+    : [];
+
   const handleBlockDay = (dateStr: string) => {
     setBlockModal({ open: true, date: dateStr, slot: null });
     setBlockReason('');
@@ -198,7 +268,20 @@ export default function CalendarioPage() {
     setBlockReason('');
   };
 
-  const confirmBlock = async () => {
+  // Block changes are made one at a time: each one starts from the current
+  // list of blocks, so overlapping clicks could otherwise undo each other.
+  const [savingBlocks, setSavingBlocks] = useState(false);
+  const withBlocksSaving = async (change: () => Promise<void>) => {
+    if (savingBlocks) return;
+    setSavingBlocks(true);
+    try {
+      await change();
+    } finally {
+      setSavingBlocks(false);
+    }
+  };
+
+  const confirmBlock = () => withBlocksSaving(async () => {
     if (!blockModal.date) return;
     if (blockModal.slot) {
       const existing = overrides.find(
@@ -208,7 +291,8 @@ export default function CalendarioPage() {
           o.blocked_slots.length > 0,
       );
       if (existing) {
-        await deleteOverride(existing.id);
+        // Save the merged list before removing the old one, so a failed
+        // request never loses the existing blocks
         await addOverride({
           date: blockModal.date,
           start_time: null,
@@ -219,6 +303,7 @@ export default function CalendarioPage() {
             ...new Set([...existing.blocked_slots, blockModal.slot]),
           ].sort(),
         });
+        await deleteOverride(existing.id);
       } else {
         await addOverride({
           date: blockModal.date,
@@ -241,37 +326,46 @@ export default function CalendarioPage() {
     }
     setBlockModal({ open: false, date: '', slot: null });
     setBlockReason('');
-  };
+  });
 
-  const handleUnblockDay = async (dateStr: string) => {
+  const handleUnblockDay = (dateStr: string) => withBlocksSaving(async () => {
+    // Only the full-day block: blocks of specific slots stay in place
     const toRemove = overrides.filter(
-      (o) => o.date === dateStr && o.is_blocked,
+      (o) => o.date === dateStr && isFullDayBlock(o),
     );
     for (const o of toRemove) {
       await deleteOverride(o.id);
     }
-  };
+  });
 
-  const handleUnblockSlot = async (dateStr: string, slot: string) => {
-    const existing = overrides.find(
-      (o) =>
-        o.date === dateStr && o.blocked_slots && o.blocked_slots.includes(slot),
-    );
-    if (existing) {
-      const newSlots = existing.blocked_slots.filter((s) => s !== slot);
-      await deleteOverride(existing.id);
-      if (newSlots.length > 0) {
-        await addOverride({
-          date: dateStr,
-          start_time: null,
-          end_time: null,
-          is_blocked: true,
-          reason: existing.reason,
-          blocked_slots: newSlots,
-        });
+  const handleUnblockSlot = (dateStr: string, slot: string) =>
+    withBlocksSaving(async () => {
+      // The same slot can be blocked more than once (e.g. from Disponibilidad)
+      const containing = overrides.filter(
+        (o) =>
+          o.date === dateStr &&
+          o.blocked_slots &&
+          o.blocked_slots.some((s) => normalizeTime(s) === slot),
+      );
+      for (const existing of containing) {
+        const newSlots = existing.blocked_slots.filter(
+          (s) => normalizeTime(s) !== slot,
+        );
+        // Save the remaining slots before removing the old list, so a failed
+        // request never loses the other blocks
+        if (newSlots.length > 0) {
+          await addOverride({
+            date: dateStr,
+            start_time: null,
+            end_time: null,
+            is_blocked: true,
+            reason: existing.reason,
+            blocked_slots: newSlots,
+          });
+        }
+        await deleteOverride(existing.id);
       }
-    }
-  };
+    });
 
   const isDayOfWeekActive = useCallback(
     (dayOfWeek: number) => {
@@ -396,7 +490,7 @@ export default function CalendarioPage() {
                         <div className="mt-1 flex justify-center gap-1">
                           {dayBlocked ? (
                             <button
-                              onClick={() => handleUnblockDay(dateStr)}
+                              onClick={() => setUnblockDayDate(dateStr)}
                               className="flex items-center gap-0.5 rounded-md bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/20"
                               title="Desbloquear dia"
                             >
@@ -420,7 +514,7 @@ export default function CalendarioPage() {
                 })}
               </div>
 
-              {timeLabels.map((slot) => (
+              {weekRows.map((slot) => (
                 <div
                   key={slot}
                   className="grid grid-cols-[72px_repeat(7,1fr)] border-b last:border-b-0"
@@ -437,10 +531,22 @@ export default function CalendarioPage() {
                     const dayBlocked = isDayBlocked(dateStr);
                     const slotBlocked = isSlotBlocked(dateStr, slot);
                     const isActive = isDayOfWeekActive(day.getDay());
-                    const appt = (appointmentsByDate[dateStr] || []).find(
-                      (a) => a.start_time.slice(0, 5) === slot,
+                    const appt = pickAppointment(
+                      (appointmentsByDate[dateStr] || []).filter(
+                        (a) => normalizeTime(a.start_time) === slot,
+                      ),
                     );
-                    const slotInRange = isActive;
+                    // A slot patients can book on this day (if it is free)
+                    const isDaySlot = daySlots(day).includes(slot);
+                    // Not bookable because it overlaps a block or a booking
+                    // that starts at another time
+                    const blockedByOverlap =
+                      !slotBlocked &&
+                      overlapsBlock(slot, blockedMap[dateStr]?.overrides ?? []);
+                    const bookedByOverlap = overlapsAppointment(
+                      slot,
+                      confirmedOn(dateStr),
+                    );
 
                     return (
                       <div
@@ -450,7 +556,9 @@ export default function CalendarioPage() {
                           isToday && 'bg-primary/[0.02]',
                           dayBlocked && 'bg-destructive/[0.04]',
                           !isActive && 'bg-muted/30',
-                          slotBlocked && !dayBlocked && 'bg-destructive/[0.06]',
+                          (slotBlocked || blockedByOverlap) &&
+                            !dayBlocked &&
+                            'bg-destructive/[0.06]',
                         )}
                       >
                         {appt ? (
@@ -481,7 +589,21 @@ export default function CalendarioPage() {
                           >
                             <ShieldBan className="h-4 w-4" />
                           </button>
-                        ) : isActive && slotInRange && !dayBlocked ? (
+                        ) : !isDaySlot || dayBlocked ? null : blockedByOverlap ? (
+                          <div
+                            className="flex h-full w-full items-center justify-center rounded-md border border-dashed border-destructive/20 text-destructive/40"
+                            title="No disponible: se superpone con un horario bloqueado"
+                          >
+                            <ShieldBan className="h-4 w-4" />
+                          </div>
+                        ) : bookedByOverlap ? (
+                          <div
+                            className="flex h-full w-full items-center justify-center rounded-md bg-muted/60 text-[10px] text-muted-foreground"
+                            title="No disponible: se superpone con otro turno"
+                          >
+                            Ocupado
+                          </div>
+                        ) : (
                           <button
                             onClick={() => handleBlockSlot(dateStr, slot)}
                             className="flex h-full w-full items-center justify-center rounded-md text-transparent transition-colors group-hover:bg-muted/60 group-hover:text-muted-foreground/50"
@@ -489,7 +611,7 @@ export default function CalendarioPage() {
                           >
                             <Ban className="h-3.5 w-3.5" />
                           </button>
-                        ) : null}
+                        )}
                       </div>
                     );
                   })}
@@ -545,10 +667,10 @@ export default function CalendarioPage() {
                       </span>
 
                       {inMonth && isActive && (
-                        <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                        <div className="flex items-center gap-0.5 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                           {dayBlocked ? (
                             <button
-                              onClick={() => handleUnblockDay(dateStr)}
+                              onClick={() => setUnblockDayDate(dateStr)}
                               className="rounded p-0.5 text-destructive hover:bg-destructive/10"
                               title="Desbloquear"
                             >
@@ -576,7 +698,7 @@ export default function CalendarioPage() {
                       </div>
                     )}
 
-                    {inMonth && !dayBlocked && dayAppts.length > 0 && (
+                    {inMonth && dayAppts.length > 0 && (
                       <div className="space-y-0.5">
                         {dayAppts.slice(0, 3).map((a) => (
                           <button
@@ -593,7 +715,7 @@ export default function CalendarioPage() {
                             )}
                           >
                             <span className="font-mono text-[10px] font-semibold">
-                              {a.start_time}
+                              {normalizeTime(a.start_time)}
                             </span>
                             {a.client && (
                               <span className="truncate text-[10px]">
@@ -648,8 +770,8 @@ export default function CalendarioPage() {
                 <div>
                   <p className="text-xs text-muted-foreground">Horario</p>
                   <p className="font-mono text-sm font-semibold text-foreground">
-                    {selectedAppointment.start_time} -{' '}
-                    {selectedAppointment.end_time}
+                    {normalizeTime(selectedAppointment.start_time)} -{' '}
+                    {normalizeTime(selectedAppointment.end_time)}
                   </p>
                 </div>
               </div>
@@ -751,6 +873,47 @@ export default function CalendarioPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Unblock day confirmation */}
+      <Dialog
+        open={unblockDayDate !== null}
+        onOpenChange={(open) => {
+          if (!open) setUnblockDayDate(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Desbloquear dia</DialogTitle>
+            <DialogDescription>
+              {unblockDayDate &&
+                format(
+                  new Date(unblockDayDate + 'T12:00:00'),
+                  "EEEE d 'de' MMMM, yyyy",
+                  { locale: es },
+                )}
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Los clientes podran volver a reservar este dia. Los horarios
+            bloqueados uno por uno siguen bloqueados.
+          </p>
+          <DialogFooter className="gap-2">
+            <DialogClose asChild>
+              <Button variant="outline">Volver</Button>
+            </DialogClose>
+            <Button
+              onClick={async () => {
+                if (unblockDayDate) {
+                  await handleUnblockDay(unblockDayDate);
+                  setUnblockDayDate(null);
+                }
+              }}
+            >
+              Desbloquear
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Delete confirmation dialog */}
       <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <DialogContent className="sm:max-w-sm">
@@ -814,6 +977,16 @@ export default function CalendarioPage() {
                 ? 'Los clientes no podran reservar este horario.'
                 : 'Los clientes no podran reservar ningun turno en este dia.'}
             </div>
+
+            {affectedAppointments.length > 0 && (
+              <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-sm text-warning">
+                {affectedAppointments.length === 1
+                  ? 'Ya hay 1 turno confirmado'
+                  : `Ya hay ${affectedAppointments.length} turnos confirmados`}{' '}
+                {blockModal.slot ? 'en este horario' : 'en este dia'}. Bloquear
+                no los cancela.
+              </div>
+            )}
 
             <div>
               <label className="mb-1 block text-sm font-medium text-foreground">

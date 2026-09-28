@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { AdminLayout } from '@/components/admin-layout';
 import { useAvailability, useOverrides } from '@/hooks/use-api';
+import { generateDaySlots } from '@/lib/availability';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
@@ -88,24 +89,6 @@ function TimePicker({
 
 type BlockType = 'full_day' | 'specific_slots' | 'vacation_range';
 
-function generateAllSlots(startTime: string, endTime: string): string[] {
-  const [startH, startM] = startTime.split(':').map(Number);
-  const [endH, endM] = endTime.split(':').map(Number);
-  const startMinutes = startH * 60 + startM;
-  const endMinutes = endH * 60 + endM;
-  const slots: string[] = [];
-  let current = startMinutes;
-  while (current + 60 <= endMinutes) {
-    const h = Math.floor(current / 60);
-    const m = current % 60;
-    slots.push(
-      `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`,
-    );
-    current += 75;
-  }
-  return slots;
-}
-
 export default function DisponibilidadPage() {
   const {
     availability,
@@ -141,7 +124,7 @@ export default function DisponibilidadPage() {
       (a) => a.day_of_week === dayOfWeek && a.is_active,
     );
     if (!dayAvail) return [];
-    return generateAllSlots(dayAvail.start_time, dayAvail.end_time);
+    return generateDaySlots(dayAvail);
   }, [overrideDate, availability]);
 
   const vacationDays = useMemo(() => {

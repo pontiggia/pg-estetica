@@ -72,11 +72,14 @@ export default function ClientesPage() {
   const [apptTime, setApptTime] = useState('');
   const [apptTreatments, setApptTreatments] = useState<string[]>([]);
   const [creatingAppt, setCreatingAppt] = useState(false);
+  const [apptError, setApptError] = useState<string | null>(null);
 
-  const { slots: availableSlots, loading: slotsLoading } = useAvailableSlots(
-    apptDate || null,
-    true,
-  );
+  const {
+    slots: availableSlots,
+    loading: slotsLoading,
+    error: slotsError,
+    refetch: refetchSlots,
+  } = useAvailableSlots(apptDate || null, true);
 
   const loading = clientsLoading || appointmentsLoading;
 
@@ -153,6 +156,7 @@ export default function ClientesPage() {
     if (!apptClientId || !apptDate || !apptTime || apptTreatments.length === 0)
       return;
     setCreatingAppt(true);
+    setApptError(null);
     try {
       const [h, m] = apptTime.split(':').map(Number);
       const endH = h + 1;
@@ -166,8 +170,13 @@ export default function ClientesPage() {
         treatment_ids: apptTreatments,
       });
       resetApptDialog();
-    } catch {
-      // could show toast
+    } catch (err) {
+      // e.g. the slot was booked or blocked after the list was loaded
+      setApptError(
+        err instanceof Error ? err.message : 'No se pudo crear el turno',
+      );
+      setApptTime('');
+      refetchSlots();
     } finally {
       setCreatingAppt(false);
     }
@@ -178,6 +187,7 @@ export default function ClientesPage() {
     setApptDate('');
     setApptTime('');
     setApptTreatments([]);
+    setApptError(null);
     setShowNewAppt(false);
   };
 
@@ -500,6 +510,7 @@ export default function ClientesPage() {
                 onChange={(e) => {
                   setApptDate(e.target.value);
                   setApptTime('');
+                  setApptError(null);
                 }}
               />
             </div>
@@ -512,6 +523,10 @@ export default function ClientesPage() {
                   <div className="flex items-center justify-center py-4">
                     <Loader2 className="h-5 w-5 animate-spin text-primary" />
                   </div>
+                ) : slotsError ? (
+                  <p className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-3 text-center text-sm text-destructive">
+                    No se pudieron cargar los horarios: {slotsError}
+                  </p>
                 ) : availableSlots.length === 0 ? (
                   <p className="rounded-lg border bg-muted/30 px-3 py-3 text-center text-sm text-muted-foreground">
                     No hay horarios disponibles en esta fecha.
@@ -563,6 +578,12 @@ export default function ClientesPage() {
               </div>
             </div>
           </div>
+
+          {apptError && (
+            <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {apptError}
+            </div>
+          )}
 
           <DialogFooter>
             <DialogClose asChild>
