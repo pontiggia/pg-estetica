@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
@@ -12,6 +12,7 @@ import {
   Plus,
   UserPlus,
   Pencil,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { AdminLayout } from '@/components/admin-layout';
 import {
@@ -19,6 +20,7 @@ import {
   useAppointments,
   useTreatments,
   useAvailableSlots,
+  downloadPatientWorkbook,
 } from '@/hooks/use-api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -73,6 +75,11 @@ export default function ClientesPage() {
   const [apptTreatments, setApptTreatments] = useState<string[]>([]);
   const [creatingAppt, setCreatingAppt] = useState(false);
   const [apptError, setApptError] = useState<string | null>(null);
+
+  // Excel export of every client
+  const [exporting, setExporting] = useState(false);
+  const exportingRef = useRef(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const {
     slots: availableSlots,
@@ -203,6 +210,24 @@ export default function ClientesPage() {
     setShowNewAppt(true);
   };
 
+  const handleExport = async () => {
+    // A second click while the file is being made would download it twice
+    if (exportingRef.current) return;
+    exportingRef.current = true;
+    setExporting(true);
+    setExportError(null);
+    try {
+      await downloadPatientWorkbook();
+    } catch (err) {
+      setExportError(
+        err instanceof Error ? err.message : 'No se pudo generar el archivo',
+      );
+    } finally {
+      exportingRef.current = false;
+      setExporting(false);
+    }
+  };
+
   if (loading) {
     return (
       <AdminLayout>
@@ -217,19 +242,38 @@ export default function ClientesPage() {
     <AdminLayout>
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <p className="text-sm text-muted-foreground">
-            {clients.length} cliente{clients.length !== 1 ? 's' : ''} registrado
-            {clients.length !== 1 ? 's' : ''}
-          </p>
-          <div className="flex items-center gap-2">
-            <div className="relative">
+          {/* The export always has every client, so it sits by the total
+              rather than next to the search */}
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-muted-foreground">
+              {clients.length} cliente{clients.length !== 1 ? 's' : ''} registrado
+              {clients.length !== 1 ? 's' : ''}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              onClick={handleExport}
+              disabled={exporting}
+              aria-busy={exporting}
+            >
+              {exporting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="h-4 w-4" />
+              )}
+              Exportar Excel
+            </Button>
+          </div>
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <div className="relative w-full sm:w-auto">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Buscar cliente..."
-                className="w-56 rounded-lg border bg-card py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full rounded-lg border bg-card py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring sm:w-56"
               />
             </div>
             <Button
@@ -251,6 +295,15 @@ export default function ClientesPage() {
             </Button>
           </div>
         </div>
+
+        {exportError && (
+          <div
+            role="alert"
+            className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          >
+            {exportError}
+          </div>
+        )}
 
         {/* Client cards */}
         <div className="grid gap-3 sm:grid-cols-2">

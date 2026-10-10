@@ -343,6 +343,39 @@ export function useClients() {
   };
 }
 
+// Downloads every client, with the appointment history, in Paula's patient
+// workbook ("Fichero Digital de Pacientes", Excel)
+export async function downloadPatientWorkbook(): Promise<void> {
+  let res: Response;
+  let file: Blob;
+  try {
+    res = await fetch('/api/clients/export', { cache: 'no-store' });
+    file = await res.blob();
+  } catch {
+    throw new Error('Error de conexión. Intentá de nuevo.');
+  }
+  if (res.status === 401)
+    throw new Error('Tu sesión venció. Volvé a iniciar sesión.');
+  if (res.status === 403)
+    throw new Error('No tenés permisos de administrador.');
+  if (!res.ok)
+    throw new Error('No se pudo generar el archivo. Intentá de nuevo.');
+
+  const fileName =
+    /filename="([^"]+)"/.exec(
+      res.headers.get('Content-Disposition') ?? '',
+    )?.[1] ?? 'Fichero_Digital_Pacientes.xlsx';
+  const url = URL.createObjectURL(file);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Revoking right away can cancel the download in Safari and Firefox
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
 // ---------------------------------------------------------------------------
 // Current user profile
 // ---------------------------------------------------------------------------
